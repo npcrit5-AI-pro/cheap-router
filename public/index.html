@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cheap Router</title>
+<style>
+:root{--bg:#0f1115;--card:#171a21;--card2:#1e222b;--line:#2a2f3a;--text:#e8eaf0;--mute:#8b93a5;--or:#ff7a1a;--or2:#ff9a4d;--orbg:rgba(255,122,26,.12)}
+*{box-sizing:border-box;scrollbar-color:#3a404d transparent}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;display:flex;flex-direction:column}
+a{color:var(--or)}
+.wrap{width:100%;max-width:860px;margin:0 auto;padding:0 16px}
+header{position:sticky;top:0;z-index:5;background:rgba(15,17,21,.85);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+header .wrap{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-top:12px;padding-bottom:12px}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;letter-spacing:.2px}
+.logo i{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--or),#ff4d00);display:grid;place-items:center;font-style:normal;color:#111;font-weight:800}
+.pills{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
+.pill{font-size:12px;padding:4px 10px;border-radius:999px;background:var(--card2);border:1px solid var(--line);color:var(--mute)}
+.pill b{color:var(--or2);font-weight:600}
+main{flex:1}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:14px 0}
+.key{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.key input[type=password]{flex:1;min-width:220px}
+input,textarea{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;outline:none}
+input:focus,textarea:focus{border-color:var(--or);box-shadow:0 0 0 3px var(--orbg)}
+button{background:var(--or);color:#141414;border:0;border-radius:10px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer}
+button:hover{background:var(--or2)}button:disabled{opacity:.5;cursor:default}
+.ok{color:#7ddc8a;font-weight:600}.mute{color:var(--mute);font-size:13px}
+label.chk{display:flex;gap:6px;align-items:center;color:var(--mute);font-size:13px}
+.link{background:none;color:var(--or);padding:0;font-weight:500}
+details.panel summary{cursor:pointer;font-weight:600;list-style:none;display:flex;gap:8px;align-items:baseline}details.panel summary::-webkit-details-marker{display:none}
+details.panel summary::after{content:"▾";color:var(--or);margin-left:auto}details.panel[open] summary::after{content:"▴"}
+.rows{margin-top:10px;max-height:340px;overflow:auto}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 150px 130px;gap:10px;align-items:center;padding:5px 0;font-size:12.5px;border-bottom:1px solid #20242d}
+.row .id{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{position:relative;height:8px;background:var(--card2);border-radius:99px;overflow:hidden}
+.bar .t{position:absolute;inset:0 auto 0 0;background:rgba(255,122,26,.25)}
+.bar .a{position:absolute;inset:0 auto 0 0;background:var(--or);border-radius:99px}
+.row .n{text-align:right;white-space:nowrap;color:var(--mute);font-variant-numeric:tabular-nums}
+#log{display:flex;flex-direction:column;gap:12px;padding:6px 0 20px}
+.msg{max-width:85%;padding:10px 14px;border-radius:16px;white-space:pre-wrap;word-wrap:break-word}
+.u{align-self:flex-end;background:linear-gradient(135deg,var(--or),#ff5a00);color:#151515;border-bottom-right-radius:4px}
+.a{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+.a.err{border-color:#7a2b2b;background:#221416}
+.meta{margin-top:8px;font-size:12px;color:var(--mute);white-space:normal}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--orbg);color:var(--or2);border:1px solid rgba(255,122,26,.35);font-size:11.5px;font-weight:600;margin-right:6px}
+.meta details{display:inline}.meta summary{display:inline;cursor:pointer;color:var(--or)}
+.why{margin-top:6px;padding:8px 10px;background:var(--bg);border-radius:8px;border:1px solid var(--line)}
+.why div{margin:2px 0}
+.empty{text-align:center;color:var(--mute);padding:40px 0}
+.dots span{display:inline-block;width:7px;height:7px;margin:0 2px;border-radius:50%;background:var(--or);animation:b 1s infinite}
+.dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-4px)}}
+footer{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 30%);padding:16px 0 14px}
+.bar-in{display:flex;gap:8px;align-items:flex-end;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:8px}
+.bar-in textarea{flex:1;border:0;resize:none;max-height:180px;min-height:44px;background:transparent;box-shadow:none}
+.hint{font-size:11.5px;color:var(--mute);margin-top:6px;text-align:center}
+@media(max-width:600px){.msg{max-width:95%}.row{grid-template-columns:minmax(0,1fr) 70px 112px}.pills{margin-left:0}}
+</style></head>
+<body>
+<header><div class="wrap"><div class="logo"><i>⇢</i>Cheap Router</div>
+<div class="pills"><span class="pill" id="pcap">cap …</span><span class="pill" id="pcount">… models</span></div></div></header>
+<main><div class="wrap">
+  <section class="card" id="keycard"></section>
+  <section class="card"><details class="panel" id="sharesPanel"><summary>Model shares <span class="mute" id="stotal"></span></summary>
+    <div class="mute" style="margin-top:6px">Bar: <span style="color:var(--or)">■</span> actual &nbsp;<span style="color:rgba(255,122,26,.45)">■</span> target</div>
+    <div class="rows" id="sh"></div></details></section>
+  <div id="log"><div class="empty" id="empty">Ask anything. The router picks the best cheap model for each prompt.</div></div>
+</div></main>
+<footer><div class="wrap"><div class="bar-in"><textarea id="p" rows="1" placeholder="Message Cheap Router…"></textarea><button id="send" onclick="go()">Send</button></div>
+<div class="hint">Enter to send · Shift+Enter for a new line</div></div></footer>
+<script>
+const $=id=>document.getElementById(id),msgs=[];
+const pct=x=>(x*100).toFixed(x<0.01?3:1)+'%';
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+fetch('/api/models').then(r=>r.json()).then(j=>{$('pcap').innerHTML=`cap <b>${esc(j.cap.note)}</b> · $${(j.cap.prompt*1e6).toFixed(2)}/$${(j.cap.completion*1e6).toFixed(2)} /M`;$('pcount').innerHTML=`<b>${j.count}</b> eligible models`});
+function keyForm(){$('keycard').innerHTML=`<div class="key"><input id="key" type="password" placeholder="OpenRouter API key (sk-or-…)" autocomplete="off"><label class="chk"><input type="checkbox" id="savekey"> remember (save to .env)</label><button onclick="setKey()">Save key</button></div><div class="mute" style="margin-top:6px">The key stays on the server and is never sent back to the browser.</div>`}
+function keySaved(t){$('keycard').innerHTML=`<div class="key"><span class="ok">Key saved ✓</span><span class="mute">${t||''}</span><button class="link" style="margin-left:auto" onclick="keyForm()">Change key</button></div>`}
+fetch('/api/status').then(r=>r.json()).then(j=>j.hasKey?keySaved('loaded on server'):keyForm());
+async function setKey(){const k=$('key').value.trim();if(!k)return;const j=await (await fetch('/api/key',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:k,save:$('savekey').checked})})).json();keySaved(j.saved?'saved to .env':'in server memory only')}
+async function shares(){const j=await (await fetch('/api/shares')).json();$('stotal').textContent=`· ${j.total} answers`;
+ const mx=Math.max(...j.rows.map(r=>Math.max(r.target,r.actual)),1e-9);
+ $('sh').innerHTML=j.rows.map(r=>`<div class="row"><div class="id" title="${esc(r.id)}">${esc(r.id)}</div><div class="bar"><div class="t" style="width:${r.target/mx*100}%"></div><div class="a" style="width:${r.actual/mx*100}%"></div></div><div class="n">${pct(r.actual)} / ${pct(r.target)}</div></div>`).join('')}
+shares();
+function bubble(cls,html){$('empty')?.remove();const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;$('log').appendChild(d);d.scrollIntoView({behavior:'smooth',block:'end'});return d}
+function whyHtml(j){const parts=String(j.why||'').split('; ').map(s=>`<div>${esc(s)}</div>`).join('');
+ const fb=(j.attempts||[]).map(a=>`<div>↳ fell back from <b>${esc(a.model)}</b>: ${esc(a.error)}</div>`).join('');return `<div class="why">${parts}${fb}</div>`}
+async function go(){const t=$('p').value.trim();if(!t||$('send').disabled)return;$('p').value='';grow();
+ bubble('u',esc(t));msgs.push({role:'user',content:t});$('send').disabled=true;
+ const w=bubble('a','<span class="dots"><span></span><span></span><span></span></span>');
+ try{const j=await (await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:msgs})})).json();
+  if(j.error){w.classList.add('err');w.innerHTML=`Error: ${esc(j.error)}`+((j.attempts||[]).length?`<div class="meta"><details><summary>details</summary>${whyHtml(j)}</details></div>`:'');msgs.pop();return}
+  msgs.push({role:'assistant',content:j.reply});
+  w.innerHTML=`${esc(j.reply)}<div class="meta"><span class="badge">${esc(j.model)}</span><span class="mute">${esc(j.category)}</span>${j.attempts.length?` · ${j.attempts.length} fallback${j.attempts.length>1?'s':''}`:''} · <details><summary>why this model</summary>${whyHtml(j)}</details></div>`;shares();
+ }catch(e){w.classList.add('err');w.textContent='Network error: '+e.message;msgs.pop()}
+ finally{$('send').disabled=false;w.scrollIntoView({behavior:'smooth',block:'end'});$('p').focus()}}
+function grow(){const p=$('p');p.style.height='auto';p.style.height=Math.min(p.scrollHeight,180)+'px'}
+$('p').addEventListener('input',grow);
+$('p').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();go()}});
+</script></body></html>
