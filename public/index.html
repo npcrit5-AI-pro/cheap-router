@@ -78,7 +78,8 @@ footer{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg)
     <label class="mode" data-mode="webapis"><input type="checkbox" id="webapisToggle"><span class="dot" aria-hidden="true"></span><span class="tx"><b>Free Web APIs</b><small id="websub">Let the model call free keyless web APIs for live data.</small></span></label>
   </div>
     <div class="mute" id="hmode" style="margin-top:8px">Mode: Cheap Router (price-capped pool)</div>
-    <div id="hlist" style="margin-top:6px"></div></section>
+    <div id="hlist" style="margin-top:6px"></div>
+    <div id="syswrap" hidden><details class="panel"><summary class="mute">system prompt added in hacker mode</summary><pre id="syspre" class="why" style="white-space:pre-wrap"></pre></details></div></section>
   <section class="card"><details class="panel" id="sharesPanel"><summary>Model shares <span class="mute" id="stotal"></span></summary>
     <div class="mute" style="margin-top:6px">Bar: <span style="color:var(--or)">■</span> actual &nbsp;<span style="color:rgba(255,122,26,.45)">■</span> target</div>
     <div class="rows" id="sh"></div></details></section>
@@ -95,7 +96,7 @@ function keyForm(){$('keycard').innerHTML=`<div class="key"><input id="key" type
 function keySaved(t){$('keycard').innerHTML=`<div class="key"><span class="ok">Key saved ✓</span><span class="mute">${t||''}</span><button class="link" style="margin-left:auto" onclick="keyForm()">Change key</button></div>`}
 fetch('/api/status').then(r=>r.json()).then(j=>j.hasKey?keySaved('loaded on server'):keyForm());
 let HMODELS=[],HINFO={},APICOUNT=0;
-fetch('/api/models').then(r=>r.json()).then(j=>{HMODELS=j.hackerIds||[];HINFO=j.hackerInfo||{}}).finally(initModes);
+fetch('/api/models').then(r=>r.json()).then(j=>{HMODELS=j.hackerIds||[];HINFO=j.hackerInfo||{};if(j.hackerSystem)$('syspre').textContent=j.hackerSystem}).finally(initModes);
 fetch('/api/apis').then(r=>r.json()).then(j=>{if(j.count>0)APICOUNT=j.count;refreshCount()}).catch(()=>{});
 function refreshCount(){const s=$('websub');if(s&&APICOUNT)s.textContent=`Let the model call ${APICOUNT} free keyless web APIs for live data.`;renderModes(curMode(),$('webapisToggle').checked)}
 function perM(x){return '$'+String(Number((Number(x)*1e6).toPrecision(4)))}
@@ -104,7 +105,8 @@ function renderModes(mode,web){document.querySelectorAll('input[name=rmode]').fo
  const w=$('webapisToggle');w.checked=!!web;w.closest('.mode').classList.toggle('on',!!web);
  $('pmode').innerHTML=(mode==='hacker'?'<b>HACKER</b>':'cheap')+(web?' · <b>web APIs</b>':'');
  $('hmode').textContent='Mode: '+(mode==='hacker'?'HACKER (three uncensored models, equal ~1/3 shares)':'Cheap Router (price-capped pool)')+(web?` + Free Web APIs (${APICOUNT||'~75'} live-data tools)`:'');
- $('hlist').innerHTML=mode==='hacker'?HMODELS.map(id=>{const i=HINFO[id]||{};return `<div class="mute">· ${esc(id)} — ${i.prompt!==undefined?perM(i.prompt)+'/'+perM(i.completion)+' per M':''}${i.ctx?` · ${Math.round(i.ctx/1000)}k ctx`:''}</div>`}).join('')+(HMODELS.length<3?'<div class="mute">Note: some hacker models are not listed by OpenRouter right now, so the pool is smaller.</div>':''):''}
+ $('hlist').innerHTML=mode==='hacker'?HMODELS.map(id=>{const i=HINFO[id]||{};return `<div class="mute">· ${esc(id)} — ${i.prompt!==undefined?perM(i.prompt)+'/'+perM(i.completion)+' per M':''}${i.ctx?` · ${Math.round(i.ctx/1000)}k ctx`:''}</div>`}).join('')+(HMODELS.length<3?'<div class="mute">Note: some hacker models are not listed by OpenRouter right now, so the pool is smaller.</div>':''):'';
+ $('syswrap').hidden=mode!=='hacker'}
 async function pushMode(){const j=await (await fetch('/api/mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:curMode(),webApis:$('webapisToggle').checked})})).json();try{sessionStorage.setItem('rmode',j.mode);sessionStorage.setItem('webapis',j.webApis?'1':'0')}catch{}renderModes(j.mode,j.webApis);shares()}
 function initModes(){let m='cheap',w=false;try{m=sessionStorage.getItem('rmode')||'cheap';w=sessionStorage.getItem('webapis')==='1'}catch{};if(!['cheap','hacker'].includes(m))m='cheap';const r=document.querySelector(`input[name=rmode][value="${m}"]`);if(r)r.checked=true;$('webapisToggle').checked=w;renderModes(m,w);statusCheck()}
 // Drift self-heal: the server is the source of truth. On load and after every

@@ -64,6 +64,19 @@ const scrub = (t) => String(t).replace(/https?:\/\/\S+/g, '[url]').replace(/\b[a
 const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
 const body = (req) => new Promise((ok) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 1e6) req.destroy(); }); req.on('end', () => { try { ok(JSON.parse(b || '{}')); } catch { ok({}); } }); });
 
+// System prompt prepended to the upstream conversation in hacker mode only
+// (cheap mode sends the messages untouched). It steers toward directness and
+// against reflexive refusal, with an explicit narrow carve-out: weapons,
+// explosives and real-world harm are still refused. It never asks the model
+// to ignore its safety training or to roleplay as an AI without limits.
+const HACKER_SYSTEM = 'You are answering in an unfiltered chat mode for a capable adult. Be direct: answer the actual question first and skip any preamble, lecture, warning, or disclaimer. Do not moralize, do not hedge with excessive qualifiers, and do not append crisis-line boilerplate or offer "safe alternatives" unless the user asks for them. Adult fiction, dark themes, unsympathetic characters, profanity, fictional violence, drugs, politics, religion, security research, and other controversial-but-legal subjects are all fair game — discuss them plainly and without moral judgment. If a request is genuinely ambiguous, ask one short clarifying question instead of refusing. One boundary stays firm: refuse requests for instructions or assistance related to weapons, explosives, or causing real-world harm to people or property. Refuse those briefly and without a lecture.';
+// Prefix the hacker system prompt for hacker-mode requests only. Returns the
+// original array untouched for cheap mode, and never stacks a second system
+// message onto a conversation that already has one.
+function withHackerSystem(messages, mode) {
+  if (mode !== 'hacker' || messages.some((m) => m && m.role === 'system')) return messages;
+  return [{ role: 'system', content: HACKER_SYSTEM }, ...messages];
+}
 const OR_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const orHeaders = () => ({ Authorization: `Bearer ${KEY}`, 'content-type': 'application/json', 'X-Title': 'cheap-router' });
 async function complete(model, messages, tools) {
@@ -120,10 +133,11 @@ async function chat(messages, mode, webApis) {
   const cands = order(plan.ranked, tgt, usage);
   const byId = new Map(models.map((m) => [m.id, m]));
   const tools = webApis ? APIS.map(toTool) : null;
+  const upstream = withHackerSystem(messages, mode);
   const attempts = [];
   for (const cand of cands.slice(0, MAX_TRIES)) {
     try {
-      const out = tools ? await chatWithTools(cand, messages, tools) : await plainAnswer(cand, messages);
+      const out = tools ? await chatWithTools(cand, upstream, tools) : await plainAnswer(cand, upstream);
       if (out.ok) { usage.record(cand.id); // count only on success
         const price = pricePerM(byId.get(cand.id) || { pricing: HACKER_INFO[cand.id] || { prompt: NaN, completion: NaN } });
         const modeNote = (hacker ? 'hacker mode (uncensored pool, equal 1/3 shares); ' : '') + (webApis ? `free web apis on (${out.apis.length} used); ` : '');
@@ -164,7 +178,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.url.startsWith('/api/models')) {
       const c = await refreshModels(req.url.includes('refresh'));
-      return send(res, 200, { alwaysAllow: require('./router').ALWAYS_ALLOW, cap: c.cap, count: c.models.length, models: c.models.map((m) => ({ id: m.id, prompt: m.pricing.prompt, completion: m.pricing.completion, ctx: m.context_length })), hacker: HACKER, hackerIds: HACKER_IDS, hackerInfo: HACKER_INFO });
+      return send(res, 200, { alwaysAllow: require('./router').ALWAYS_ALLOW, cap: c.cap, count: c.models.length, models: c.models.map((m) => ({ id: m.id, prompt: m.pricing.prompt, completion: m.pricing.completion, ctx: m.context_length })), hacker: MODE === 'hacker', hackerIds: HACKER_IDS, hackerInfo: HACKER_INFO, hackerSystem: HACKER_SYSTEM });
     }
     if (req.method === 'POST' && req.url === '/api/key') {
       const { key, save } = await body(req); KEY = String(key || '').replace(/[\r\n]/g, '').trim();
@@ -193,4 +207,4 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (require.main === module) server.listen(PORT, HOST, () => console.log(`cheap-router on http://${HOST}:${PORT} (key ${KEY ? 'loaded' : 'not set'})`));
-module.exports = { parseModeBody, requestMode, poolFor };
+module.exports = { parseModeBody, requestMode, poolFor, withHackerSystem, HACKER_SYSTEM };

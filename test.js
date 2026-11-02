@@ -1,6 +1,6 @@
 const { refreshModels, rank, ALWAYS_ALLOW, HACKER_IDS, HACKER_INFO, hackerSet } = require('./router');
 const { equalTargets, Usage, order } = require('./alloc');
-const { parseModeBody, requestMode, poolFor } = require('./server');
+const { parseModeBody, requestMode, poolFor, withHackerSystem, HACKER_SYSTEM } = require('./server');
 const { APIS, find, buildUrl, toTool, publicCatalog } = require('./apis');
 const assert = require('assert');
 (async () => {
@@ -47,6 +47,19 @@ const assert = require('assert');
   assert.deepStrictEqual(requestMode({ mode: 'hacker', webApis: true }), { mode: 'hacker', webApis: true });
   assert.deepStrictEqual(requestMode({ mode: 'evil', webApis: 'x' }), { mode: 'cheap', webApis: false }, 'unknown values fall back');
   console.log('hacker pool guarantee OK');
+  // Hacker system prompt: prepended as the first message for hacker-mode
+  // requests only; cheap mode sends messages untouched; never doubled up.
+  const convo = [{ role: 'user', content: 'hi' }];
+  const hw = withHackerSystem(convo, 'hacker');
+  assert.strictEqual(hw[0].role, 'system', 'system message goes first');
+  assert.strictEqual(hw[0].content, HACKER_SYSTEM, 'uses the repo constant verbatim');
+  assert.strictEqual(hw.length, convo.length + 1, 'nothing else added or removed');
+  assert.deepStrictEqual(withHackerSystem(convo, 'cheap'), convo, 'cheap mode untouched');
+  assert.strictEqual(withHackerSystem([{ role: 'system', content: 'mine' }, ...convo], 'hacker').length, convo.length + 1, 'existing system message kept, no duplicate');
+  assert(/weapon/i.test(HACKER_SYSTEM) && /explosive/i.test(HACKER_SYSTEM), 'weapons/explosives carve-out present');
+  assert(/real-world harm/i.test(HACKER_SYSTEM), 'real-world-harm carve-out present');
+  assert(!/without limits|ignore.{0,20}safety|disregard.{0,20}saf/i.test(HACKER_SYSTEM), 'no ignore-your-training language');
+  console.log('hacker system prompt OK');
   // Mode bodies: new {mode, webApis} shape plus backward-compatible {hacker}.
   assert.deepStrictEqual(parseModeBody({ hacker: true }), { mode: 'hacker', webApis: null });
   assert.deepStrictEqual(parseModeBody({ hacker: false }), { mode: 'cheap', webApis: null });

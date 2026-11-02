@@ -82,6 +82,8 @@ The three models (exact OpenRouter ids, prices per million tokens):
 
 Note: these are third-party uncensored models whose output is not moderated by this router. You are responsible for what you send them and what you do with their replies.
 
+In hacker mode the server also prepends a system prompt (shown in full under the mode boxes via a collapsible "system prompt" section, hacker mode only) that tells the model to be direct: answer the question first, skip lectures, warnings, moralizing, crisis-line boilerplate and unasked-for "safe alternatives", and treat controversial-but-legal subjects as fair game. The carve-out is explicit and narrow: requests for instructions or assistance related to weapons, explosives, or causing real-world harm to people or property are still refused.
+
 ## Free Web APIs
 When the Free Web APIs box is on, the chat passes a catalog of free, public, keyless HTTPS APIs to the model as callable tools (OpenAI-compatible function calling via OpenRouter): weather, country data, crypto prices, exchange rates, geocoding, IP info, DNS, dictionaries, jokes, ISS position, recipes, books and library catalogs, public-domain texts, preprints, holidays and more. The model may call tools for up to 4 rounds (call → result fed back → continue) before answering. Replies list which APIs were used as small chips under the answer. If the picked model does not support tools, the chat falls back to a plain answer.
 
