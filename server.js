@@ -1,13 +1,30 @@
 const http = require('http'), fs = require('fs'), path = require('path');
 const { refreshModels, rank, hackerSet, HACKER_IDS, HACKER_INFO } = require('./router');
 const { targets, equalTargets, Usage, order } = require('./alloc');
+const { APIS, find, executeApi, toTool, publicCatalog } = require('./apis');
 
 // tiny .env loader (never logs values)
 try { for (const l of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split('\n')) {
   const m = l.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
 } } catch {}
 let KEY = process.env.OPENROUTER_API_KEY || '';
-let HACKER = false; // hacker-mode toggle: in-memory only, never written to .env
+let MODE = 'cheap'; // routing mode: 'cheap' or 'hacker'. In-memory only, never written to .env.
+let WEBAPIS = false; // free-web-APIs tools toggle. Also in-memory only.
+const modeState = () => ({ mode: MODE, hacker: MODE === 'hacker', webApis: WEBAPIS });
+// Parse POST /api/mode bodies. New shape {mode:'cheap'|'hacker', webApis:bool};
+// the old {hacker:bool} shape still works (only when mode is absent, so it
+// can't clobber an explicit mode). Unknown values are ignored, never throw.
+function parseModeBody(b) {
+  b = b && typeof b === 'object' ? b : {};
+  let mode = null, webApis = null;
+  if (b.mode === 'cheap' || b.mode === 'hacker') mode = b.mode;
+  else if (b.hacker === true || b.hacker === 1 || b.hacker === 'true') mode = 'hacker';
+  else if (b.hacker === false || b.hacker === 0 || b.hacker === 'false') mode = 'cheap';
+  const w = b.webApis !== undefined ? b.webApis : b.webapis;
+  if (w === true || w === 1 || w === 'true') webApis = true;
+  else if (w === false || w === 0 || w === 'false') webApis = false;
+  return { mode, webApis };
+}
 const usage = new Usage(process.env.USAGE_FILE || path.join(__dirname, 'usage.json'));
 const pct = (x) => (x * 100).toFixed(3) + '%';
 // "$prompt/$completion per M tokens" with enough precision for sub-cent prices
@@ -17,7 +34,7 @@ const pricePerM = (m) => `${perMTok(m.pricing.prompt)}/${perMTok(m.pricing.compl
 // the three ids (from the full fetched list) with equal 1/3 targets; the price
 // cap and ALWAYS_ALLOW logic in filterEligible are bypassed for this mode only.
 function poolFor(c) {
-  if (!HACKER) return { models: c.models, tgt: targets(c.models), hacker: false };
+  if (MODE !== 'hacker') return { models: c.models, tgt: targets(c.models), hacker: false };
   const three = hackerSet(c.all && c.all.length ? c.all : c.models);
   return { models: three, tgt: equalTargets(three), hacker: true };
 }
@@ -39,6 +56,53 @@ const scrub = (t) => String(t).replace(/https?:\/\/\S+/g, '[url]').replace(/\b[a
 const send = (res, code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
 const body = (req) => new Promise((ok) => { let b = ''; req.on('data', (c) => { b += c; if (b.length > 1e6) req.destroy(); }); req.on('end', () => { try { ok(JSON.parse(b || '{}')); } catch { ok({}); } }); });
 
+const OR_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const orHeaders = () => ({ Authorization: `Bearer ${KEY}`, 'content-type': 'application/json', 'X-Title': 'cheap-router' });
+async function complete(model, messages, tools) {
+  const r = await fetch(OR_URL, { method: 'POST', headers: orHeaders(),
+    body: JSON.stringify(tools ? { model, messages, tools, tool_choice: 'auto' } : { model, messages }) });
+  const j = await r.json().catch(() => ({}));
+  return { r, j };
+}
+// One plain completion, no tools.
+async function plainAnswer(cand, messages) {
+  const { r, j } = await complete(cand.id, messages, null);
+  const text = j.choices?.[0]?.message?.content;
+  if (r.ok && text) return { ok: true, text, apis: [] };
+  return { ok: false, error: `${r.status} ${j.error?.message || 'empty reply'}`, unauthorized: r.status === 401 };
+}
+// Tool-calling chat: pass the web-API catalog as functions, execute calls
+// server-side, feed results back, up to 4 tool rounds, then a final answer.
+// If the model can't do tools, fall back to a plain answer (never a 500).
+async function chatWithTools(cand, messages, tools) {
+  const conv = messages.map((m) => ({ role: m.role, content: m.content ?? '' }));
+  const seen = new Map();
+  for (let round = 0; round < 4; round++) {
+    const { r, j } = await complete(cand.id, conv, tools);
+    const msg = j.choices?.[0]?.message, calls = msg?.tool_calls;
+    if (!r.ok) {
+      if (round === 0 && /tool/i.test(j?.error?.message || '')) return plainAnswer(cand, messages);
+      return { ok: false, error: `${r.status} ${j.error?.message || 'empty reply'}`, unauthorized: r.status === 401 };
+    }
+    if (!calls?.length) {
+      if (msg?.content) return { ok: true, text: msg.content, apis: [...seen.values()] };
+      return { ok: false, error: 'empty reply' };
+    }
+    conv.push({ role: 'assistant', content: msg.content || '', tool_calls: calls.map((t) => ({ id: t.id, type: 'function', function: { name: t.function?.name, arguments: t.function?.arguments } })) });
+    for (const t of calls.slice(0, 8)) {
+      const entry = find(t.function?.name);
+      let args = {}; try { args = JSON.parse(t.function?.arguments || '{}'); } catch {}
+      if (!entry) conv.push({ role: 'tool', tool_call_id: t.id, content: JSON.stringify({ ok: false, error: 'unknown tool' }) });
+      else {
+        const res = await executeApi(entry, args && typeof args === 'object' ? args : {});
+        if (!seen.has(entry.id)) seen.set(entry.id, { id: entry.id, name: entry.name });
+        conv.push({ role: 'tool', tool_call_id: t.id, content: JSON.stringify(res.ok ? res.data : { ok: false, error: res.error }).slice(0, 4000) });
+      }
+    }
+  }
+  return plainAnswer(cand, conv); // tool rounds used up: final answer on the gathered context
+}
+
 async function chat(messages) {
   const c = await refreshModels();
   const { models, tgt, hacker } = poolFor(c);
@@ -47,28 +111,23 @@ async function chat(messages) {
   const plan = rank(String(last), models);
   const cands = order(plan.ranked, tgt, usage);
   const byId = new Map(models.map((m) => [m.id, m]));
+  const tools = WEBAPIS ? APIS.map(toTool) : null;
   const attempts = [];
   for (const cand of cands.slice(0, MAX_TRIES)) {
     try {
-      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${KEY}`, 'content-type': 'application/json', 'X-Title': 'cheap-router' },
-        body: JSON.stringify({ model: cand.id, messages }),
-      });
-      const j = await r.json().catch(() => ({}));
-      const text = j.choices?.[0]?.message?.content;
-      if (r.ok && text) { usage.record(cand.id); // count only on success
+      const out = tools ? await chatWithTools(cand, messages, tools) : await plainAnswer(cand, messages);
+      if (out.ok) { usage.record(cand.id); // count only on success
         const price = pricePerM(byId.get(cand.id) || { pricing: HACKER_INFO[cand.id] || { prompt: NaN, completion: NaN } });
-        const modeNote = hacker ? 'hacker mode (uncensored pool, equal 1/3 shares); ' : '';
-        return { reply: text, model: cand.id, category: plan.cat, hacker, price, why: `${modeNote}${plan.why}; picked ${cand.id}: ${cand.why}; fit ${cand.fit.toFixed(2)} × deficit ${cand.deficit.toFixed(2)}; target ${pct(cand.target)}, actual before ${pct(cand.actual)} (now ${pct(usage.share(cand.id))})`, attempts }; }
-      attempts.push({ model: cand.id, error: scrub(`${r.status} ${j.error?.message || 'empty reply'}`) });
-      if (r.status === 401) break;
+        const modeNote = (hacker ? 'hacker mode (uncensored pool, equal 1/3 shares); ' : '') + (WEBAPIS ? `free web apis on (${out.apis.length} used); ` : '');
+        return { reply: out.text, model: cand.id, category: plan.cat, hacker, webApis: WEBAPIS, apis: out.apis, price, why: `${modeNote}${plan.why}; picked ${cand.id}: ${cand.why}; fit ${cand.fit.toFixed(2)} × deficit ${cand.deficit.toFixed(2)}; target ${pct(cand.target)}, actual before ${pct(cand.actual)} (now ${pct(usage.share(cand.id))})`, attempts }; }
+      attempts.push({ model: cand.id, error: scrub(out.error) });
+      if (out.unauthorized) break;
     } catch (e) { attempts.push({ model: cand.id, error: scrub(e.message) }); }
   }
   throw Object.assign(new Error('All candidate models failed'), { attempts, category: plan.cat, hacker });
 }
 
-http.createServer(async (req, res) => {
+const server = http.createServer(async (req, res) => {
   try {
     if (!hostOk(req.headers.host)) return send(res, 421, { error: 'bad host' });
     if (req.method === 'POST' && !sameOrigin(req)) return send(res, 403, { error: 'cross-origin request refused' });
@@ -78,11 +137,22 @@ http.createServer(async (req, res) => {
       const c = await refreshModels(); const { models, tgt, hacker } = poolFor(c);
       return send(res, 200, { total: usage.total(), hacker, rows: Object.keys(tgt).sort((a, b) => tgt[b] - tgt[a] || (a < b ? -1 : 1)).map((id) => ({ id, target: tgt[id], actual: usage.share(id), count: usage.counts[id] || 0, price: models.some((m) => m.id === id) ? pricePerM(models.find((m) => m.id === id)) : undefined })) });
     }
-    if (req.url === '/api/status') return send(res, 200, { hasKey: !!KEY, hacker: HACKER });
+    if (req.url === '/api/status') return send(res, 200, { hasKey: !!KEY, ...modeState() });
     if (req.url === '/api/mode') {
       if (req.method !== 'POST') return send(res, 404, { error: 'not found' });
-      const { hacker } = await body(req); HACKER = hacker === true || hacker === 1 || hacker === 'true';
-      return send(res, 200, { hacker: HACKER }); // same-origin + JSON protections apply (checked above for all POSTs); in-memory only
+      const parsed = parseModeBody(await body(req));
+      if (parsed.mode) MODE = parsed.mode;
+      if (parsed.webApis !== null) WEBAPIS = parsed.webApis;
+      return send(res, 200, modeState()); // same-origin + JSON protections apply (checked above for all POSTs); in-memory only
+    }
+    if (req.url === '/api/apis') // public catalog metadata only: no fetch logic, no secrets
+      return send(res, 200, { count: APIS.length, apis: publicCatalog() });
+    if (req.method === 'POST' && req.url === '/api/apis/call') {
+      const { id, params } = await body(req);
+      const entry = find(String(id || ''));
+      if (!entry) return send(res, 400, { ok: false, error: 'unknown api id' });
+      const out = await executeApi(entry, params && typeof params === 'object' ? params : {});
+      return send(res, out.ok ? 200 : 502, out);
     }
     if (req.url.startsWith('/api/models')) {
       const c = await refreshModels(req.url.includes('refresh'));
@@ -108,5 +178,8 @@ http.createServer(async (req, res) => {
       return send(res, 200, await chat(messages || []));
     }
     send(res, 404, { error: 'not found' });
-  } catch (e) { send(res, 502, { error: scrub(e.message), attempts: e.attempts, hacker: e.hacker !== undefined ? e.hacker : HACKER }); }
-}).listen(PORT, HOST, () => console.log(`cheap-router on http://${HOST}:${PORT} (key ${KEY ? 'loaded' : 'not set'})`));
+  } catch (e) { send(res, 502, { error: scrub(e.message), attempts: e.attempts, hacker: e.hacker !== undefined ? e.hacker : MODE === 'hacker', webApis: WEBAPIS }); }
+});
+
+if (require.main === module) server.listen(PORT, HOST, () => console.log(`cheap-router on http://${HOST}:${PORT} (key ${KEY ? 'loaded' : 'not set'})`));
+module.exports = { parseModeBody };

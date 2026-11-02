@@ -60,5 +60,8 @@ function run(models, n = 10000) {
   // Normal mode is unaffected: the stock FIXED 50/10 split is intact after the hacker runs.
   const nt = targets(models);
   assert(Math.abs(nt['meta/muse-spark-1.3-contributor'] - 0.5) < 1e-12 && Math.abs(nt['anthropic/claude-haiku-5.5'] - 0.1) < 1e-12, 'normal FIXED split intact after hacker runs');
+  // Hacker pool stays exactly the three ids: no Magnum, ever.
+  assert.strictEqual(HACKER_IDS.length, 3, 'three-model hacker pool');
+  assert(!HACKER_IDS.some((id) => /magnum/i.test(id)), 'no magnum in hacker pool');
   console.log('hacker sim OK');
 })().catch((e) => { console.error(e.message); process.exit(1); });

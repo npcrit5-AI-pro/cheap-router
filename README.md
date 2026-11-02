@@ -19,7 +19,7 @@ You can also paste the key into the field on the page. By default it is kept onl
 ## Security defaults
 - **Network binding.** The server binds to **127.0.0.1** by default. Set `HOST` to change this, but exposing it to a network lets anyone there spend your key.
 - **Allowed hosts.** Requests whose `Host` header is not `localhost`, `127.0.0.1` or `[::1]` are refused. This blocks DNS rebinding.
-- **Same-origin POSTs only.** POST endpoints (`/api/key`, `/api/chat`, `/api/route`, `/api/mode`) accept only `application/json` requests, which forces a CORS preflight that the server never approves. Any foreign `Origin` or a cross-site `Sec-Fetch-Site` is also refused, so other websites can't set or save your key or spend your credits.
+- **Same-origin POSTs only.** POST endpoints (`/api/key`, `/api/chat`, `/api/route`, `/api/mode`, `/api/apis/call`) accept only `application/json` requests, which forces a CORS preflight that the server never approves. Any foreign `Origin` or a cross-site `Sec-Fetch-Site` is also refused, so other websites can't set or save your key or spend your credits.
 - **No file serving.** The server returns one fixed file, `public/index.html`. It does not serve arbitrary paths, so path traversal is not possible.
 - **Error scrubbing.** URLs, long hex ids and anything that looks like a key are removed from upstream error text before it reaches the UI.
 
@@ -64,17 +64,30 @@ The UI shows the target and actual share for each pick, plus a collapsible table
 
 `npm test` runs the price-filter test and `sim.test.js`. The sim test runs 10,000 mixed prompts twice. It checks that Contributor is about 50% and Haiku about 10%, every other model is at or under 8%, and both runs make identical picks.
 
+## Modes
+The page shows three mode boxes instead of a single switch:
+- **Cheap Router** (default) — routes across the normal price-capped pool.
+- **Hacker Mode** — the three uncensored models at equal ~1/3 shares; ignores the price cap. See below.
+- **Free Web APIs** — independent on/off toggle that stacks on top of either routing mode: when on, the model can call a toolbox of free keyless web APIs for live data. See below.
+
+Cheap Router and Hacker Mode are mutually exclusive (radio pair); Free Web APIs is a separate on/off. Both choices last for the browser session only (kept in `sessionStorage` and server memory via `POST /api/mode`; never written to `.env`). The header shows what is active, and every reply is badged with the model id and its price per M tokens so the cost is visible.
+
 ## Hacker mode
-Off by default. When on, the router ignores the price cap (and `ALWAYS_ALLOW`) and routes every prompt to exactly three uncensored/open models. Classification and scoring are unchanged, so task fit still tilts each pick within the three, and the same deterministic deficit-weighted allocation from `alloc.js` is used — but with equal targets (1/3 each) instead of the normal 50/10 split, so over time each of the three answers about a third of prompts. If a model fails, the next candidate is tried, staying within the three.
+When on, the router ignores the price cap (and `ALWAYS_ALLOW`) and routes every prompt to exactly three uncensored/open models. Classification and scoring are unchanged, so task fit still tilts each pick within the three, and the same deterministic deficit-weighted allocation from `alloc.js` is used — but with equal targets (1/3 each) instead of the normal 50/10 split, so over time each of the three answers about a third of prompts. If a model fails, the next candidate is tried, staying within the three.
 
 The three models (exact OpenRouter ids, prices per million tokens):
 - `z-ai/glm-5.3-flash` — $0.0285/$0.0923 per M, 1M ctx
 - `cognitivecomputations/dolphin-mistral-24b-venice-edition` — $0.2/$0.9 per M, 128k ctx
 - `mistralai/mistral-nemo` — $0.029/$0.03 per M, 131k ctx
 
-To turn it on, tick the **HACKER MODE** checkbox on the page. The state lasts for the browser session only (kept in `sessionStorage` and server memory via `POST /api/mode`; never written to `.env`). The page header shows which mode is active, lists the three models while hacker mode is on, and every reply is badged `HACKER` with the model id and its price per M tokens so the cost is visible.
-
 Note: these are third-party uncensored models whose output is not moderated by this router. You are responsible for what you send them and what you do with their replies.
 
+## Free Web APIs
+When the Free Web APIs box is on, the chat passes a catalog of free, public, keyless HTTPS APIs to the model as callable tools (OpenAI-compatible function calling via OpenRouter): weather, country data, crypto prices, exchange rates, geocoding, IP info, DNS, dictionaries, jokes, ISS position, recipes, books, papers, holidays and more. The model may call tools for up to 4 rounds (call → result fed back → continue) before answering. Replies list which APIs were used as small chips under the answer. If the picked model does not support tools, the chat falls back to a plain answer.
+
+The catalog lives in `apis.js` (id, name, category, model-facing description, URL template, declared params, and a result mapper that keeps responses small). `npm run apis` (`apis.check.js`) live-verifies every entry with sample params and reports status, latency and mapper output — run it when touching the catalog. It is separate from `npm test` precisely so the test suite never needs the network for this.
+
+Security: tools execute server-side only, behind `POST /api/apis/call`. Only URLs generated from the catalog template can be fetched, the host must match that entry, HTTPS only, never a caller-supplied URL — treat the allowlist as a security boundary. Calls have an 8s timeout and a ~200KB response cap, accept JSON or text only, and failures come back as a clean error object, never a throw.
+
 ## API
-`GET /api/models`, `POST /api/route {prompt}` (dry run), `POST /api/chat {messages}`, `POST /api/key {key}`, `POST /api/mode {hacker}`, `GET /api/shares`.
+`GET /api/models`, `POST /api/route {prompt}` (dry run), `POST /api/chat {messages}`, `POST /api/key {key}`, `POST /api/mode {mode, webApis}` (`mode` is `cheap`/`hacker`; the old `{hacker:bool}` body still works), `GET /api/apis` (catalog metadata), `POST /api/apis/call {id, params}`, `GET /api/shares`.

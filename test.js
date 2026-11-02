@@ -1,5 +1,7 @@
 const { refreshModels, rank, ALWAYS_ALLOW, HACKER_IDS, HACKER_INFO, hackerSet } = require('./router');
 const { equalTargets } = require('./alloc');
+const { parseModeBody } = require('./server');
+const { APIS, find, buildUrl, toTool, publicCatalog } = require('./apis');
 const assert = require('assert');
 (async () => {
   const { cap, models } = await refreshModels(true);
@@ -27,5 +29,36 @@ const assert = require('assert');
   assert.strictEqual(hr.ranked.length, 3, 'all three hacker models fit a normal prompt');
   assert(hr.ranked.every((r) => HACKER_IDS.includes(r.id)), 'hacker ranking stays within the three');
   console.log('hacker set OK:', three.map((m) => m.id).join(', '));
+  // Mode bodies: new {mode, webApis} shape plus backward-compatible {hacker}.
+  assert.deepStrictEqual(parseModeBody({ hacker: true }), { mode: 'hacker', webApis: null });
+  assert.deepStrictEqual(parseModeBody({ hacker: false }), { mode: 'cheap', webApis: null });
+  assert.deepStrictEqual(parseModeBody({ mode: 'hacker', webApis: true }), { mode: 'hacker', webApis: true });
+  assert.deepStrictEqual(parseModeBody({ mode: 'cheap', webApis: false }), { mode: 'cheap', webApis: false });
+  assert.deepStrictEqual(parseModeBody({}), { mode: null, webApis: null });
+  assert.deepStrictEqual(parseModeBody({ mode: 'evil', webApis: 'maybe' }), { mode: null, webApis: null });
+  assert.deepStrictEqual(parseModeBody({ mode: 'cheap', hacker: true }), { mode: 'cheap', webApis: null }, 'explicit mode wins over legacy hacker flag');
+  console.log('mode bodies OK');
+  // Hacker pool stays exactly the three ids, no Magnum.
+  assert.deepStrictEqual(HACKER_IDS, ['z-ai/glm-5.3-flash', 'cognitivecomputations/dolphin-mistral-24b-venice-edition', 'mistralai/mistral-nemo']);
+  // Web-API catalog shape (offline: structure only, live checks are `npm run apis`).
+  assert(APIS.length >= 70 && APIS.length <= 90, `roughly 75 apis (got ${APIS.length})`);
+  assert.strictEqual(new Set(APIS.map((e) => e.id)).size, APIS.length, 'api ids unique');
+  for (const e of APIS) {
+    assert(/^[a-z0-9-]{1,64}$/.test(e.id), `bad tool id ${e.id}`);
+    assert(e.name && e.category && e.description, `metadata missing for ${e.id}`);
+    assert(e.url.startsWith('https://'), `not https: ${e.id}`);
+    assert(!/(api[_-]?key|apikey|secret|password|token)/i.test(e.url), `key-like param in ${e.id}`);
+    assert(typeof e.map === 'function', `no mapper for ${e.id}`);
+    assert(e.params && typeof e.params === 'object', `no params for ${e.id}`);
+    const u = new URL(buildUrl(e, e.example || {}));
+    assert(u.protocol === 'https:' && u.host === e.host, `url escapes allowlist for ${e.id}`);
+    const t = toTool(e);
+    assert(t.type === 'function' && /^[a-zA-Z0-9_-]{1,64}$/.test(t.function.name) && t.function.parameters.type === 'object', `bad tool schema for ${e.id}`);
+  }
+  assert(!find('nope/not-real'), 'unknown api id returns undefined');
+  const pub = publicCatalog();
+  assert.strictEqual(pub.length, APIS.length, 'public catalog covers every entry');
+  assert(pub.every((e) => e.id && e.name && e.category && e.description && e.params && !('map' in e) && !('url' in e)), 'public catalog is metadata only');
+  console.log(`web-api catalog OK: ${APIS.length} entries`);
   if (bad.length || missing.length) process.exit(1);
 })();
