@@ -30,13 +30,21 @@ const pct = (x) => (x * 100).toFixed(3) + '%';
 // "$prompt/$completion per M tokens" with enough precision for sub-cent prices
 const perMTok = (x) => '$' + String(Number((Number(x) * 1e6).toPrecision(4)));
 const pricePerM = (m) => `${perMTok(m.pricing.prompt)}/${perMTok(m.pricing.completion)} per M`;
-// Candidate pool + share targets for the current mode. Hacker mode uses exactly
-// the three ids (from the full fetched list) with equal 1/3 targets; the price
-// cap and ALWAYS_ALLOW logic in filterEligible are bypassed for this mode only.
-function poolFor(c) {
-  if (MODE !== 'hacker') return { models: c.models, tgt: targets(c.models), hacker: false };
+// Candidate pool + share targets for a routing mode. The pool is derived from
+// the mode passed in (per request), never from ambient state: a hacker-mode
+// request builds candidates ONLY from HACKER_IDS via hackerSet(), so cheap
+// models can never leak in, and the MAX_TRIES fallback loop in chat() walks
+// this same list. `mode` defaults to the global only for callers that omit it.
+function poolFor(c, mode = MODE) {
+  if (mode !== 'hacker') return { models: c.models, tgt: targets(c.models), hacker: false };
   const three = hackerSet(c.all && c.all.length ? c.all : c.models);
   return { models: three, tgt: equalTargets(three), hacker: true };
+}
+// Effective routing for one request body: client-sent mode wins; the globals
+// are only the fallback for older clients/curl that omit mode.
+function requestMode(b) {
+  const p = parseModeBody(b);
+  return { mode: p.mode || MODE, webApis: p.webApis !== null ? p.webApis : WEBAPIS };
 }
 const PORT = process.env.PORT || 3000, MAX_TRIES = 4;
 const HOST = process.env.HOST || '127.0.0.1'; // localhost only by default; set HOST=0.0.0.0 at your own risk
@@ -103,28 +111,28 @@ async function chatWithTools(cand, messages, tools) {
   return plainAnswer(cand, conv); // tool rounds used up: final answer on the gathered context
 }
 
-async function chat(messages) {
+async function chat(messages, mode, webApis) {
   const c = await refreshModels();
-  const { models, tgt, hacker } = poolFor(c);
+  const { models, tgt, hacker } = poolFor(c, mode);
   if (!models.length) throw new Error(hacker ? 'No hacker models listed by OpenRouter right now' : 'No eligible models');
   const last = messages[messages.length - 1]?.content || '';
   const plan = rank(String(last), models);
   const cands = order(plan.ranked, tgt, usage);
   const byId = new Map(models.map((m) => [m.id, m]));
-  const tools = WEBAPIS ? APIS.map(toTool) : null;
+  const tools = webApis ? APIS.map(toTool) : null;
   const attempts = [];
   for (const cand of cands.slice(0, MAX_TRIES)) {
     try {
       const out = tools ? await chatWithTools(cand, messages, tools) : await plainAnswer(cand, messages);
       if (out.ok) { usage.record(cand.id); // count only on success
         const price = pricePerM(byId.get(cand.id) || { pricing: HACKER_INFO[cand.id] || { prompt: NaN, completion: NaN } });
-        const modeNote = (hacker ? 'hacker mode (uncensored pool, equal 1/3 shares); ' : '') + (WEBAPIS ? `free web apis on (${out.apis.length} used); ` : '');
-        return { reply: out.text, model: cand.id, category: plan.cat, hacker, webApis: WEBAPIS, apis: out.apis, price, why: `${modeNote}${plan.why}; picked ${cand.id}: ${cand.why}; fit ${cand.fit.toFixed(2)} × deficit ${cand.deficit.toFixed(2)}; target ${pct(cand.target)}, actual before ${pct(cand.actual)} (now ${pct(usage.share(cand.id))})`, attempts }; }
+        const modeNote = (hacker ? 'hacker mode (uncensored pool, equal 1/3 shares); ' : '') + (webApis ? `free web apis on (${out.apis.length} used); ` : '');
+        return { reply: out.text, model: cand.id, category: plan.cat, mode, hacker, webApis, apis: out.apis, price, why: `${modeNote}${plan.why}; picked ${cand.id}: ${cand.why}; fit ${cand.fit.toFixed(2)} × deficit ${cand.deficit.toFixed(2)}; target ${pct(cand.target)}, actual before ${pct(cand.actual)} (now ${pct(usage.share(cand.id))})`, attempts }; }
       attempts.push({ model: cand.id, error: scrub(out.error) });
       if (out.unauthorized) break;
     } catch (e) { attempts.push({ model: cand.id, error: scrub(e.message) }); }
   }
-  throw Object.assign(new Error('All candidate models failed'), { attempts, category: plan.cat, hacker });
+  throw Object.assign(new Error('All candidate models failed'), { attempts, category: plan.cat, mode, hacker });
 }
 
 const server = http.createServer(async (req, res) => {
@@ -137,7 +145,7 @@ const server = http.createServer(async (req, res) => {
       const c = await refreshModels(); const { models, tgt, hacker } = poolFor(c);
       return send(res, 200, { total: usage.total(), hacker, rows: Object.keys(tgt).sort((a, b) => tgt[b] - tgt[a] || (a < b ? -1 : 1)).map((id) => ({ id, target: tgt[id], actual: usage.share(id), count: usage.counts[id] || 0, price: models.some((m) => m.id === id) ? pricePerM(models.find((m) => m.id === id)) : undefined })) });
     }
-    if (req.url === '/api/status') return send(res, 200, { hasKey: !!KEY, ...modeState() });
+    if (req.url === '/api/status') return send(res, 200, { hasKey: !!KEY, ...modeState(), apiCount: APIS.length });
     if (req.url === '/api/mode') {
       if (req.method !== 'POST') return send(res, 404, { error: 'not found' });
       const parsed = parseModeBody(await body(req));
@@ -168,18 +176,21 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { hasKey: !!KEY, saved: !!(save && KEY) });
     }
     if (req.method === 'POST' && req.url === '/api/route') {
-      const { prompt } = await body(req); const c = await refreshModels();
-      const { models, tgt, hacker } = poolFor(c);
-      const p = rank(String(prompt || ''), models); return send(res, 200, { cat: p.cat, why: p.why, hacker, top: order(p.ranked, tgt, usage).slice(0, 5) });
+      const b = await body(req); const c = await refreshModels();
+      const { mode } = requestMode(b); // dry run honors the requested mode but doesn't move the global
+      const { models, tgt, hacker } = poolFor(c, mode);
+      const p = rank(String(b.prompt || ''), models); return send(res, 200, { cat: p.cat, why: p.why, mode, hacker, top: order(p.ranked, tgt, usage).slice(0, 5) });
     }
     if (req.method === 'POST' && req.url === '/api/chat') {
       if (!KEY) return send(res, 400, { error: 'No OpenRouter API key set' });
-      const { messages } = await body(req);
-      return send(res, 200, await chat(messages || []));
+      const b = await body(req);
+      const { mode, webApis } = requestMode(b); // route THIS request by what the client sent...
+      MODE = mode; WEBAPIS = webApis; // ...and sync the global so /api/status keeps reporting something sensible
+      return send(res, 200, await chat(b.messages || [], mode, webApis));
     }
     send(res, 404, { error: 'not found' });
-  } catch (e) { send(res, 502, { error: scrub(e.message), attempts: e.attempts, hacker: e.hacker !== undefined ? e.hacker : MODE === 'hacker', webApis: WEBAPIS }); }
+  } catch (e) { send(res, 502, { error: scrub(e.message), attempts: e.attempts, mode: e.mode !== undefined ? e.mode : MODE, hacker: e.hacker !== undefined ? e.hacker : MODE === 'hacker', webApis: WEBAPIS }); }
 });
 
 if (require.main === module) server.listen(PORT, HOST, () => console.log(`cheap-router on http://${HOST}:${PORT} (key ${KEY ? 'loaded' : 'not set'})`));
-module.exports = { parseModeBody };
+module.exports = { parseModeBody, requestMode, poolFor };

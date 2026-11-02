@@ -63,6 +63,8 @@ footer{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg)
 .mode.on .dot::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--or)}
 .mode .tx b{display:block;font-size:14px}
 .mode .tx small{display:block;color:var(--mute);font-size:12px;margin-top:2px}
+.drift{margin-bottom:10px;padding:8px 12px;border-radius:10px;background:rgba(255,60,60,.12);border:1px solid rgba(255,60,60,.5);color:#ff9a9a;font-size:13px}
+.badge.err{background:rgba(255,60,60,.15);border-color:rgba(255,60,60,.6);color:#ff8080}
 @media(max-width:600px){.msg{max-width:95%}.row{grid-template-columns:minmax(0,1fr) 70px 112px}.pills{margin-left:0}.modes{grid-template-columns:1fr}}
 </style></head>
 <body>
@@ -70,7 +72,7 @@ footer{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg)
 <div class="pills"><span class="pill" id="pcap">cap …</span><span class="pill" id="pcount">… models</span><span class="pill" id="pmode">cheap mode</span></div></div></header>
 <main><div class="wrap">
   <section class="card" id="keycard"></section>
-  <section class="card"><div class="modes" id="modes" role="group" aria-label="Routing mode">
+  <section class="card"><div id="drift" class="drift" hidden>⚠ mode was out of sync — showing the mode the server is actually using.</div><div class="modes" id="modes" role="group" aria-label="Routing mode">
     <label class="mode" data-mode="cheap"><input type="radio" name="rmode" value="cheap" checked><span class="dot" aria-hidden="true"></span><span class="tx"><b>Cheap Router</b><small>Routes across the normal price-capped pool.</small></span></label>
     <label class="mode" data-mode="hacker"><input type="radio" name="rmode" value="hacker"><span class="dot" aria-hidden="true"></span><span class="tx"><b>Hacker Mode</b><small>Three uncensored models at equal ~1/3 shares; ignores the price cap.</small></span></label>
     <label class="mode" data-mode="webapis"><input type="checkbox" id="webapisToggle"><span class="dot" aria-hidden="true"></span><span class="tx"><b>Free Web APIs</b><small id="websub">Let the model call free keyless web APIs for live data.</small></span></label>
@@ -94,7 +96,8 @@ function keySaved(t){$('keycard').innerHTML=`<div class="key"><span class="ok">K
 fetch('/api/status').then(r=>r.json()).then(j=>j.hasKey?keySaved('loaded on server'):keyForm());
 let HMODELS=[],HINFO={},APICOUNT=0;
 fetch('/api/models').then(r=>r.json()).then(j=>{HMODELS=j.hackerIds||[];HINFO=j.hackerInfo||{}}).finally(initModes);
-fetch('/api/apis').then(r=>r.json()).then(j=>{APICOUNT=j.count||0;const s=$('websub');if(s&&APICOUNT)s.textContent=`Let the model call ${APICOUNT} free keyless web APIs for live data.`}).catch(()=>{});
+fetch('/api/apis').then(r=>r.json()).then(j=>{if(j.count>0)APICOUNT=j.count;refreshCount()}).catch(()=>{});
+function refreshCount(){const s=$('websub');if(s&&APICOUNT)s.textContent=`Let the model call ${APICOUNT} free keyless web APIs for live data.`;renderModes(curMode(),$('webapisToggle').checked)}
 function perM(x){return '$'+String(Number((Number(x)*1e6).toPrecision(4)))}
 function curMode(){const r=document.querySelector('input[name=rmode]:checked');return r?r.value:'cheap'}
 function renderModes(mode,web){document.querySelectorAll('input[name=rmode]').forEach(i=>{i.checked=i.value===mode;i.closest('.mode').classList.toggle('on',i.checked)});
@@ -103,7 +106,20 @@ function renderModes(mode,web){document.querySelectorAll('input[name=rmode]').fo
  $('hmode').textContent='Mode: '+(mode==='hacker'?'HACKER (three uncensored models, equal ~1/3 shares)':'Cheap Router (price-capped pool)')+(web?` + Free Web APIs (${APICOUNT||'~75'} live-data tools)`:'');
  $('hlist').innerHTML=mode==='hacker'?HMODELS.map(id=>{const i=HINFO[id]||{};return `<div class="mute">· ${esc(id)} — ${i.prompt!==undefined?perM(i.prompt)+'/'+perM(i.completion)+' per M':''}${i.ctx?` · ${Math.round(i.ctx/1000)}k ctx`:''}</div>`}).join('')+(HMODELS.length<3?'<div class="mute">Note: some hacker models are not listed by OpenRouter right now, so the pool is smaller.</div>':''):''}
 async function pushMode(){const j=await (await fetch('/api/mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:curMode(),webApis:$('webapisToggle').checked})})).json();try{sessionStorage.setItem('rmode',j.mode);sessionStorage.setItem('webapis',j.webApis?'1':'0')}catch{}renderModes(j.mode,j.webApis);shares()}
-function initModes(){let m='cheap',w=false;try{m=sessionStorage.getItem('rmode')||'cheap';w=sessionStorage.getItem('webapis')==='1'}catch{};if(!['cheap','hacker'].includes(m))m='cheap';const r=document.querySelector(`input[name=rmode][value="${m}"]`);if(r)r.checked=true;$('webapisToggle').checked=w;pushMode()}
+function initModes(){let m='cheap',w=false;try{m=sessionStorage.getItem('rmode')||'cheap';w=sessionStorage.getItem('webapis')==='1'}catch{};if(!['cheap','hacker'].includes(m))m='cheap';const r=document.querySelector(`input[name=rmode][value="${m}"]`);if(r)r.checked=true;$('webapisToggle').checked=w;renderModes(m,w);statusCheck()}
+// Drift self-heal: the server is the source of truth. On load and after every
+// send, compare with /api/status; on mismatch adopt the server's values, show
+// a single warning banner, and never leave the page displaying a stale mode.
+async function statusCheck(){try{const j=await (await fetch('/api/status')).json();
+ if(typeof j.apiCount==='number'&&j.apiCount>0&&j.apiCount!==APICOUNT){APICOUNT=j.apiCount;refreshCount()}
+ const sm=j.mode==='hacker'?'hacker':'cheap', sw=!!j.webApis;
+ if(sm!==curMode()||sw!==$('webapisToggle').checked){
+  const r=document.querySelector(`input[name=rmode][value="${sm}"]`);if(r)r.checked=true;
+  $('webapisToggle').checked=sw;
+  try{sessionStorage.setItem('rmode',sm);sessionStorage.setItem('webapis',sw?'1':'0')}catch{}
+  renderModes(sm,sw);$('drift').hidden=false;
+ } else $('drift').hidden=true;
+}catch{}}
 document.querySelectorAll('input[name=rmode]').forEach(i=>i.addEventListener('change',pushMode));
 $('webapisToggle').addEventListener('change',pushMode);
 async function setKey(){const k=$('key').value.trim();if(!k)return;const j=await (await fetch('/api/key',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:k,save:$('savekey').checked})})).json();keySaved(j.saved?'saved to .env':'in server memory only')}
@@ -117,14 +133,16 @@ function whyHtml(j){const parts=String(j.why||'').split('; ').map(s=>`<div>${esc
 async function go(){const t=$('p').value.trim();if(!t||$('send').disabled)return;$('p').value='';grow();
  bubble('u',esc(t));msgs.push({role:'user',content:t});$('send').disabled=true;
  const w=bubble('a','<span class="dots"><span></span><span></span><span></span></span>');
- try{const j=await (await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:msgs})})).json();
+ try{const j=await (await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:msgs,mode:curMode(),webApis:$('webapisToggle').checked})})).json();
   if(j.error){w.classList.add('err');w.innerHTML=`Error: ${esc(j.error)}`+((j.attempts||[]).length?`<div class="meta"><details><summary>details</summary>${whyHtml(j)}</details></div>`:'');msgs.pop();return}
   msgs.push({role:'assistant',content:j.reply});
-  const hb=j.hacker?'<span class="badge">HACKER</span>':'', pr=j.price?` · ${esc(j.price)}`:'';
+  const poolKnown=HMODELS.length>0, outOfPool=poolKnown&&curMode()==='hacker'&&!HMODELS.includes(j.model);
+  const modeBadge=outOfPool?'<span class="badge err">⚠ OUT-OF-POOL MODEL</span>':(j.hacker?'<span class="badge">HACKER</span>':'');
+  const pr=j.price?` · ${esc(j.price)}`:'';
   const chips=(j.apis||[]).map(a=>`<span class="badge" title="free web API used">⚙ ${esc(a.name||a.id)}</span>`).join('');
-  w.innerHTML=`${esc(j.reply)}<div class="meta"><span class="badge">${esc(j.model)}</span>${hb}${chips}<span class="mute">${esc(j.category)}${pr}</span>${j.attempts.length?` · ${j.attempts.length} fallback${j.attempts.length>1?'s':''}`:''} · <details><summary>why this model</summary>${whyHtml(j)}</details></div>`;shares();
+  w.innerHTML=`${esc(j.reply)}<div class="meta"><span class="badge">${esc(j.model)}</span>${modeBadge}${chips}<span class="mute">${esc(j.category)}${pr}</span>${j.attempts.length?` · ${j.attempts.length} fallback${j.attempts.length>1?'s':''}`:''} · <details><summary>why this model</summary>${whyHtml(j)}</details></div>`;shares();
  }catch(e){w.classList.add('err');w.textContent='Network error: '+e.message;msgs.pop()}
- finally{$('send').disabled=false;w.scrollIntoView({behavior:'smooth',block:'end'});$('p').focus()}}
+ finally{$('send').disabled=false;w.scrollIntoView({behavior:'smooth',block:'end'});$('p').focus();statusCheck()}}
 function grow(){const p=$('p');p.style.height='auto';p.style.height=Math.min(p.scrollHeight,180)+'px'}
 $('p').addEventListener('input',grow);
 $('p').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();go()}});

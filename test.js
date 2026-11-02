@@ -1,6 +1,6 @@
 const { refreshModels, rank, ALWAYS_ALLOW, HACKER_IDS, HACKER_INFO, hackerSet } = require('./router');
-const { equalTargets } = require('./alloc');
-const { parseModeBody } = require('./server');
+const { equalTargets, Usage, order } = require('./alloc');
+const { parseModeBody, requestMode, poolFor } = require('./server');
 const { APIS, find, buildUrl, toTool, publicCatalog } = require('./apis');
 const assert = require('assert');
 (async () => {
@@ -28,7 +28,25 @@ const assert = require('assert');
   const hr = rank('Fix this python function: def f(x): return x+', three);
   assert.strictEqual(hr.ranked.length, 3, 'all three hacker models fit a normal prompt');
   assert(hr.ranked.every((r) => HACKER_IDS.includes(r.id)), 'hacker ranking stays within the three');
-  console.log('hacker set OK:', three.map((m) => m.id).join(', '));
+  // Hard guarantee: a hacker-mode request can only ever be answered from the
+  // hacker pool. poolFor + rank + order over a list stuffed with cheap-mode
+  // decoys must yield ONLY hacker ids — every fallback candidate, not just
+  // the first pick. Cheap mode still sees the full list.
+  const hpool = poolFor({ models: synthAll, all: synthAll }, 'hacker');
+  assert(hpool.hacker === true, 'hacker flag set');
+  assert.deepStrictEqual(hpool.models.map((m) => m.id), HACKER_IDS, 'hacker pool built only from HACKER_IDS');
+  const hplan = rank('Fix this python function: def f(x): return x+', hpool.models);
+  assert(hplan.ranked.length === HACKER_IDS.length, 'no cheap model leaks into hacker ranking');
+  const hfallbacks = order(hplan.ranked, hpool.tgt, new Usage(null));
+  assert.strictEqual(hfallbacks.length, HACKER_IDS.length, 'fallback list is exactly the pool');
+  assert(hfallbacks.every((r) => HACKER_IDS.includes(r.id)), 'every fallback candidate is a hacker model');
+  const cpool = poolFor({ models: synthAll, all: synthAll }, 'cheap');
+  assert(cpool.hacker === false && cpool.models.length > HACKER_IDS.length, 'cheap pool unaffected');
+  // Per-request routing resolves client-sent mode first, globals are fallback.
+  assert.deepStrictEqual(requestMode({}), { mode: 'cheap', webApis: false }, 'omitted mode falls back to global default');
+  assert.deepStrictEqual(requestMode({ mode: 'hacker', webApis: true }), { mode: 'hacker', webApis: true });
+  assert.deepStrictEqual(requestMode({ mode: 'evil', webApis: 'x' }), { mode: 'cheap', webApis: false }, 'unknown values fall back');
+  console.log('hacker pool guarantee OK');
   // Mode bodies: new {mode, webApis} shape plus backward-compatible {hacker}.
   assert.deepStrictEqual(parseModeBody({ hacker: true }), { mode: 'hacker', webApis: null });
   assert.deepStrictEqual(parseModeBody({ hacker: false }), { mode: 'cheap', webApis: null });
