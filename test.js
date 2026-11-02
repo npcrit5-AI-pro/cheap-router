@@ -143,7 +143,7 @@ const assert = require('assert');
   // Hacker pool stays exactly the three ids, no Magnum.
   assert.deepStrictEqual(HACKER_IDS, ['z-ai/glm-5.3-flash', 'cognitivecomputations/dolphin-mistral-24b-venice-edition', 'mistralai/mistral-nemo']);
   // Web-API catalog shape (offline: structure only, live checks are `npm run apis`).
-  assert(APIS.length >= 70 && APIS.length <= 90, `roughly 75 apis (got ${APIS.length})`);
+  assert(APIS.length >= 70 && APIS.length <= 95, `roughly 90 apis (got ${APIS.length})`);
   assert.strictEqual(new Set(APIS.map((e) => e.id)).size, APIS.length, 'api ids unique');
   for (const e of APIS) {
     assert(/^[a-z0-9-]{1,64}$/.test(e.id), `bad tool id ${e.id}`);
@@ -158,6 +158,30 @@ const assert = require('assert');
     assert(t.type === 'function' && /^[a-zA-Z0-9_-]{1,64}$/.test(t.function.name) && t.function.parameters.type === 'object', `bad tool schema for ${e.id}`);
   }
   assert(!find('nope/not-real'), 'unknown api id returns undefined');
+  // New search/reading entries: mappers handle the specified response shapes,
+  // and jina's target-URL validation rejects non-web and non-public targets
+  // before any request is built (offline proof against the documented shapes).
+  const ddgOut = find('ddg-instant').map({ Heading: 'X', AbstractText: 'abc', AbstractURL: 'https://x.example',
+    RelatedTopics: [{ Text: 't1', FirstURL: 'https://t.example/1' }, { Name: 'n', Topics: [{ Text: 't2', FirstURL: 'https://t.example/2' }] }] }, {});
+  assert.strictEqual(ddgOut.heading, 'X');
+  assert.deepStrictEqual(ddgOut.related, [{ text: 't1', url: 'https://t.example/1' }, { text: 't2', url: 'https://t.example/2' }], 'nested topics flattened, capped');
+  const margOut = find('marginalia-search').map({ license: 'l', query: 'q',
+    results: [{ url: 'https://a.example', title: 'A', description: 'd' }] }, {});
+  assert.deepStrictEqual(margOut, [{ title: 'A', url: 'https://a.example', description: 'd' }]);
+  const jina = find('jina-reader');
+  const jOut = jina.map('Title: Example Domain\nURL Source: https://example.com/\nMarkdown Content:\n\nHello world', {});
+  assert.strictEqual(jOut.title, 'Example Domain');
+  assert.strictEqual(jOut.source_url, 'https://example.com/');
+  assert(jOut.text.includes('Hello world') && jOut.text.length <= 8000, 'body truncated sensibly');
+  const ju = buildUrl(jina, { url: 'https://example.com' });
+  assert.strictEqual(new URL(ju).host, 'r.jina.ai', 'reader host intact');
+  assert(!/r\.jina\.ai\/https?:\/\//.test(ju), 'target embedded whole and encoded, never raw');
+  for (const bad of ['file:///etc/passwd', 'http://localhost/', 'http://localhost:8080/x', 'http://127.0.0.1/',
+    'http://10.0.0.1/', 'http://192.168.1.1/', 'http://169.254.169.254/', 'https://user:pass@example.com/',
+    'http://[::1]/', 'javascript:alert(1)', 'ftp://example.com/x', '', 'http://0x7f000001/', 'http://2130706433/']) {
+    assert.throws(() => buildUrl(jina, { url: bad }), /allowed|missing|Invalid URL/, `jina refuses ${bad}`);
+  }
+  console.log('search/reader entries OK');
   const pub = publicCatalog();
   assert.strictEqual(pub.length, APIS.length, 'public catalog covers every entry');
   assert(pub.every((e) => e.id && e.name && e.category && e.description && e.params && !('map' in e) && !('url' in e)), 'public catalog is metadata only');

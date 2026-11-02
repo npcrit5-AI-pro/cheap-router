@@ -1,6 +1,8 @@
 // Free Web APIs toolbox: catalog of public, keyless HTTPS APIs the chat can call.
 // Every entry: no API key, no account, no signup; documented public/open API.
 // url templates use {param} placeholders; only declared params are substituted.
+// {param+} embeds one value whole (jina-reader's target URL); entries may also
+// define validate(params) to vet caller input before substitution.
 // map() shrinks the upstream response to the useful fields so tool results stay small.
 // map() may throw on API-level errors; executeApi() turns that into {ok:false}.
 const trunc = (s, n = 300) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -464,6 +466,31 @@ const APIS = [
     url: 'https://bible-api.com/{ref}',
     params: { ref: 'reference, e.g. john 3:16' }, example: { ref: 'john 3:16' },
     map: (d) => { if (d.error) throw new Error(d.error); return { reference: d.reference, text: trunc(d.text, 500), translation: d.translation_name }; } },
+  // ---- Search & reading ----
+  { id: 'ddg-instant', name: 'Instant answer lookup', category: 'Search', host: 'api.duckduckgo.com',
+    description: 'When to use: encyclopedic "what is X" lookups that a short topic summary can answer. This is an instant-answer/topic-summary endpoint, NOT a ranked web search: it is often empty for ordinary queries, so use the Marginalia web-search tool instead when you need actual web results.',
+    url: 'https://api.duckduckgo.com/?q={q}&format=json&no_html=1&skip_disambig=1',
+    params: { q: 'topic, e.g. Albert Einstein' }, example: { q: 'Albert Einstein' },
+    map: (d) => { const rel = [];
+      for (const t of d.RelatedTopics || []) {
+        if (t.Topics) for (const s of t.Topics) { if (s.Text) rel.push({ text: trunc(s.Text, 200), url: s.FirstURL }); }
+        else if (t.Text) rel.push({ text: trunc(t.Text, 200), url: t.FirstURL });
+        if (rel.length >= 8) break; }
+      return { heading: d.Heading || '', abstract: trunc(decodeEnt(d.AbstractText || ''), 600), url: d.AbstractURL || '', related: rel.slice(0, 8) }; } },
+  { id: 'marginalia-search', name: 'Web search (independent index)', category: 'Search', host: 'api.marginalia.nu',
+    description: 'When to use: the user asks something a web search can answer. This is an independent non-commercial web index: good for obscure, old-web and niche technical content, weak for mainstream news and current events.',
+    url: 'https://api.marginalia.nu/public/search/{q}',
+    params: { q: 'search terms, e.g. small web' }, example: { q: 'small web' },
+    map: (d) => (need(d.results, 'no results')).slice(0, 10).map((r) => ({ title: r.title, url: r.url, description: trunc(r.description, 250) })) },
+  { id: 'jina-reader', name: 'Read a web page as text', category: 'Reference', host: 'r.jina.ai',
+    description: 'When to use: the user gives a specific page URL and wants its content as readable text. Pass the FULL http(s) URL; local or private addresses are refused. This fetches one URL the user provides, it is not a search.',
+    url: 'https://r.jina.ai/{url+}',
+    params: { url: 'full page URL starting with http:// or https://, e.g. https://example.com' }, example: { url: 'https://example.com' },
+    validate: (p) => ({ ...p, url: publicWebUrl(p.url ?? '') }),
+    map: (d) => { const t = String(d ?? '');
+      const line = (k) => { const m = t.match(new RegExp('^' + k + ':\\s*(.*)$', 'm')); return m ? m[1].trim().slice(0, 300) : ''; };
+      return { title: line('Title'), source_url: line('URL Source'),
+        text: t.replace(/^Title:.*$/m, '').replace(/^URL Source:.*$/m, '').replace(/^Markdown Content:.*$/m, '').trim().slice(0, 8000) }; } },
   // ---- Security ----
   { id: 'nvd-cves', name: 'CVE lookup', category: 'Security', host: 'services.nvd.nist.gov',
     description: 'When to use: the user asks about known vulnerabilities (CVEs) for software like openssl or wordpress.',
@@ -495,15 +522,53 @@ const APIS = [
     map: (d) => ({ name: d.object?.fullname, class: d.object?.orbit_class?.name, near_earth: d.object?.neo, hazardous: d.object?.pha, first_observed: d.orbit?.first_obs, last_observed: d.orbit?.last_obs, observations_used: d.orbit?.n_obs_used }) },
 ];
 
+// Only a public http(s) web target passes: anything else throws, so it can
+// never be embedded in a request URL. Rejects non-web schemes, credentials in
+// the URL, and localhost / private / link-local / reserved hosts. Hostnames
+// come from the WHATWG URL parser, which normalizes numeric IPv4 tricks
+// (decimal, octal, hex, short forms) back to dotted quads before we check
+// them, so 0x7f000001 and friends are caught too. Returns the canonical URL.
+function publicWebUrl(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) throw new Error('missing target url');
+  const t = new URL(s);
+  if (t.protocol !== 'http:' && t.protocol !== 'https:') throw new Error('only http(s) targets allowed');
+  if (t.username || t.password) throw new Error('credentials in target URL not allowed');
+  let host = t.hostname.toLowerCase();
+  if (host.endsWith('.')) host = host.slice(0, -1);
+  if (host === 'localhost' || host.endsWith('.localhost')) throw new Error('local target not allowed');
+  const v4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (v4) {
+    const a = +v4[1], b = +v4[2];
+    if (a === 0 || a === 127 || a >= 224 || a === 10 || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) || (a === 169 && b === 254) || // link-local, incl. cloud metadata
+      (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)) || // reserved + benchmark
+      (a === 198 && b === 51) || (a === 203 && b === 0) || // documentation ranges
+      (a === 192 && b === 88)) throw new Error('private/reserved target host not allowed');
+  }
+  if (host.startsWith('[')) { // IPv6 literal
+    const ip = host.slice(1, -1);
+    if (ip === '::' || ip === '::1' || /^fe[89ab]/i.test(ip) || /^(fc|fd)/i.test(ip) ||
+      /^ff/i.test(ip) || ip.includes('.') || ip.startsWith('::ffff:')) throw new Error('private/reserved target host not allowed');
+  }
+  return t.toString();
+}
+
 // Build the request URL for an entry from caller params (falls back to examples).
-// Only declared params are substituted. Each value is encoded per path segment
-// (slashes survive, so ids like octocat/Hello-World keep working) and the
-// result must stay on the entry's host over HTTPS (checked again server-side).
+// Only declared params are substituted. An entry may define validate(params)
+// to normalize or reject caller params before substitution (jina-reader uses
+// it to vet its target URL). Each value is encoded per path segment (slashes
+// survive, so ids like octocat/Hello-World keep working), EXCEPT placeholders
+// written {name+} which encode the WHOLE value as one segment — the only way
+// to embed a full URL in a path. Either way the result must stay on the
+// entry's host over HTTPS (checked again server-side).
 function buildUrl(entry, params = {}) {
+  if (typeof entry.validate === 'function') params = entry.validate({ ...params }) || params;
   let u = entry.url;
   for (const k of Object.keys(entry.params)) {
     const v = params[k] ?? entry.example[k] ?? '';
     u = u.split('{' + k + '}').join(String(v).split('/').map(encodeURIComponent).join('/'));
+    u = u.split('{' + k + '+}').join(encodeURIComponent(String(v)));
   }
   if (/[{]/.test(u)) throw new Error('unfilled params for ' + entry.id);
   return checkUrl(entry, u);
