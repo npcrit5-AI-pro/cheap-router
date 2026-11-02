@@ -19,7 +19,7 @@ You can also paste the key into the field on the page. By default it is kept onl
 ## Security defaults
 - **Network binding.** The server binds to **127.0.0.1** by default. Set `HOST` to change this, but exposing it to a network lets anyone there spend your key.
 - **Allowed hosts.** Requests whose `Host` header is not `localhost`, `127.0.0.1` or `[::1]` are refused. This blocks DNS rebinding.
-- **Same-origin POSTs only.** POST endpoints (`/api/key`, `/api/chat`, `/api/route`) accept only `application/json` requests, which forces a CORS preflight that the server never approves. Any foreign `Origin` or a cross-site `Sec-Fetch-Site` is also refused, so other websites can't set or save your key or spend your credits.
+- **Same-origin POSTs only.** POST endpoints (`/api/key`, `/api/chat`, `/api/route`, `/api/mode`) accept only `application/json` requests, which forces a CORS preflight that the server never approves. Any foreign `Origin` or a cross-site `Sec-Fetch-Site` is also refused, so other websites can't set or save your key or spend your credits.
 - **No file serving.** The server returns one fixed file, `public/index.html`. It does not serve arbitrary paths, so path traversal is not possible.
 - **Error scrubbing.** URLs, long hex ids and anything that looks like a key are removed from upstream error text before it reaches the UI.
 
@@ -64,5 +64,18 @@ The UI shows the target and actual share for each pick, plus a collapsible table
 
 `npm test` runs the price-filter test and `sim.test.js`. The sim test runs 10,000 mixed prompts twice. It checks that Contributor is about 50% and Haiku about 10%, every other model is at or under 8%, and both runs make identical picks.
 
+## Hacker mode
+Off by default. When on, the router ignores the price cap (and `ALWAYS_ALLOW`) and routes every prompt to exactly four uncensored models. Classification and scoring are unchanged, so task fit still tilts each pick within the four, and the same deterministic deficit-weighted allocation from `alloc.js` is used — but with equal targets (0.25 each) instead of the normal 50/10 split, so over time each of the four answers about a quarter of prompts. If a model fails, the next candidate is tried, staying within the four.
+
+The four models (exact OpenRouter ids, prices per million tokens):
+- `z-ai/glm-5.3-flash` — $0.0285/$0.0923 per M, 1M ctx
+- `cognitivecomputations/dolphin-mistral-24b-venice-edition` — $0.2/$0.9 per M, 128k ctx
+- `anthracite-org/magnum-v4-72b` — $2.5/$5 per M, 33k ctx (the request was for "magnum 72B v1", but the only Magnum model listed on OpenRouter is v4, so that id is used)
+- `mistralai/mistral-nemo` — $0.029/$0.03 per M, 131k ctx
+
+To turn it on, tick the **HACKER MODE** checkbox on the page. The state lasts for the browser session only (kept in `sessionStorage` and server memory via `POST /api/mode`; never written to `.env`). The page header shows which mode is active, lists the four models while hacker mode is on, and every reply is badged `HACKER` with the model id and its price per M tokens so the cost is visible.
+
+Note: these are third-party uncensored models whose output is not moderated by this router. You are responsible for what you send them and what you do with their replies.
+
 ## API
-`GET /api/models`, `POST /api/route {prompt}` (dry run), `POST /api/chat {messages}`, `POST /api/key {key}`, `GET /api/shares`.
+`GET /api/models`, `POST /api/route {prompt}` (dry run), `POST /api/chat {messages}`, `POST /api/key {key}`, `POST /api/mode {hacker}`, `GET /api/shares`.

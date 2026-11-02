@@ -56,9 +56,13 @@ footer{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg)
 </style></head>
 <body>
 <header><div class="wrap"><div class="logo"><i>⇢</i>Cheap Router</div>
-<div class="pills"><span class="pill" id="pcap">cap …</span><span class="pill" id="pcount">… models</span></div></div></header>
+<div class="pills"><span class="pill" id="pcap">cap …</span><span class="pill" id="pcount">… models</span><span class="pill" id="pmode">normal mode</span></div></div></header>
 <main><div class="wrap">
   <section class="card" id="keycard"></section>
+  <section class="card"><label class="chk" style="font-size:14px;color:var(--text)"><input type="checkbox" id="hackerToggle" onchange="setHacker(this.checked)"> <b>HACKER MODE</b></label>
+    <div class="mute" style="margin-top:4px">Routes only to four uncensored models; ignores the price cap.</div>
+    <div class="mute" id="hmode" style="margin-top:6px">Mode: normal (price-capped pool)</div>
+    <div id="hlist" style="margin-top:6px"></div></section>
   <section class="card"><details class="panel" id="sharesPanel"><summary>Model shares <span class="mute" id="stotal"></span></summary>
     <div class="mute" style="margin-top:6px">Bar: <span style="color:var(--or)">■</span> actual &nbsp;<span style="color:rgba(255,122,26,.45)">■</span> target</div>
     <div class="rows" id="sh"></div></details></section>
@@ -74,10 +78,19 @@ fetch('/api/models').then(r=>r.json()).then(j=>{$('pcap').innerHTML=`cap <b>${es
 function keyForm(){$('keycard').innerHTML=`<div class="key"><input id="key" type="password" placeholder="OpenRouter API key (sk-or-…)" autocomplete="off"><label class="chk"><input type="checkbox" id="savekey"> remember (save to .env)</label><button onclick="setKey()">Save key</button></div><div class="mute" style="margin-top:6px">The key stays on the server and is never sent back to the browser.</div>`}
 function keySaved(t){$('keycard').innerHTML=`<div class="key"><span class="ok">Key saved ✓</span><span class="mute">${t||''}</span><button class="link" style="margin-left:auto" onclick="keyForm()">Change key</button></div>`}
 fetch('/api/status').then(r=>r.json()).then(j=>j.hasKey?keySaved('loaded on server'):keyForm());
+let HMODELS=[],HINFO={};
+fetch('/api/models').then(r=>r.json()).then(j=>{HMODELS=j.hackerIds||[];HINFO=j.hackerInfo||{}}).finally(initHacker);
+function perM(x){return '$'+String(Number((Number(x)*1e6).toPrecision(4)))}
+function renderHacker(on){$('hackerToggle').checked=on;
+ $('pmode').innerHTML=on?'<b>HACKER</b> mode':'normal mode';
+ $('hmode').textContent=on?'Mode: HACKER (four uncensored models, equal 25% shares)':'Mode: normal (price-capped pool)';
+ $('hlist').innerHTML=on?HMODELS.map(id=>{const i=HINFO[id]||{};return `<div class="mute">· ${esc(id)} — ${i.prompt!==undefined?perM(i.prompt)+'/'+perM(i.completion)+' per M':''}${i.ctx?` · ${Math.round(i.ctx/1000)}k ctx`:''}</div>`}).join('')+(HMODELS.length<4?'<div class="mute">Note: some hacker models are not listed by OpenRouter right now, so the pool is smaller.</div>':''):''}
+async function setHacker(on){const j=await (await fetch('/api/mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hacker:on})})).json();try{sessionStorage.setItem('hacker',j.hacker?'1':'0')}catch{}renderHacker(j.hacker);shares()}
+function initHacker(){let want=false;try{want=sessionStorage.getItem('hacker')==='1'}catch{};if(want)setHacker(true);else renderHacker(false)}
 async function setKey(){const k=$('key').value.trim();if(!k)return;const j=await (await fetch('/api/key',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:k,save:$('savekey').checked})})).json();keySaved(j.saved?'saved to .env':'in server memory only')}
-async function shares(){const j=await (await fetch('/api/shares')).json();$('stotal').textContent=`· ${j.total} answers`;
+async function shares(){const j=await (await fetch('/api/shares')).json();$('stotal').textContent=`· ${j.total} answers${j.hacker?' · HACKER mode':''}`;
  const mx=Math.max(...j.rows.map(r=>Math.max(r.target,r.actual)),1e-9);
- $('sh').innerHTML=j.rows.map(r=>`<div class="row"><div class="id" title="${esc(r.id)}">${esc(r.id)}</div><div class="bar"><div class="t" style="width:${r.target/mx*100}%"></div><div class="a" style="width:${r.actual/mx*100}%"></div></div><div class="n">${pct(r.actual)} / ${pct(r.target)}</div></div>`).join('')}
+ $('sh').innerHTML=j.rows.map(r=>`<div class="row"><div class="id" title="${esc(r.id)}${r.price?` · ${esc(r.price)}`:''}">${esc(r.id)}</div><div class="bar"><div class="t" style="width:${r.target/mx*100}%"></div><div class="a" style="width:${r.actual/mx*100}%"></div></div><div class="n">${pct(r.actual)} / ${pct(r.target)}</div></div>`).join('')}
 shares();
 function bubble(cls,html){$('empty')?.remove();const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;$('log').appendChild(d);d.scrollIntoView({behavior:'smooth',block:'end'});return d}
 function whyHtml(j){const parts=String(j.why||'').split('; ').map(s=>`<div>${esc(s)}</div>`).join('');
@@ -88,7 +101,8 @@ async function go(){const t=$('p').value.trim();if(!t||$('send').disabled)return
  try{const j=await (await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({messages:msgs})})).json();
   if(j.error){w.classList.add('err');w.innerHTML=`Error: ${esc(j.error)}`+((j.attempts||[]).length?`<div class="meta"><details><summary>details</summary>${whyHtml(j)}</details></div>`:'');msgs.pop();return}
   msgs.push({role:'assistant',content:j.reply});
-  w.innerHTML=`${esc(j.reply)}<div class="meta"><span class="badge">${esc(j.model)}</span><span class="mute">${esc(j.category)}</span>${j.attempts.length?` · ${j.attempts.length} fallback${j.attempts.length>1?'s':''}`:''} · <details><summary>why this model</summary>${whyHtml(j)}</details></div>`;shares();
+  const hb=j.hacker?'<span class="badge">HACKER</span>':'', pr=j.price?` · ${esc(j.price)}`:'';
+  w.innerHTML=`${esc(j.reply)}<div class="meta"><span class="badge">${esc(j.model)}</span>${hb}<span class="mute">${esc(j.category)}${pr}</span>${j.attempts.length?` · ${j.attempts.length} fallback${j.attempts.length>1?'s':''}`:''} · <details><summary>why this model</summary>${whyHtml(j)}</details></div>`;shares();
  }catch(e){w.classList.add('err');w.textContent='Network error: '+e.message;msgs.pop()}
  finally{$('send').disabled=false;w.scrollIntoView({behavior:'smooth',block:'end'});$('p').focus()}}
 function grow(){const p=$('p');p.style.height='auto';p.style.height=Math.min(p.scrollHeight,180)+'px'}

@@ -39,6 +39,15 @@ class Usage {
 // ranked: models from router.rank (fit score per model). Returns ordered candidates.
 // deficit = target*(N+1) - count  (picks owed); its sum over models is always 1 > 0.
 // fit is normalized to [1,2] so task fit tilts the choice but shares still converge.
+// Equal-share targets for hacker mode: every model in the pool gets 1/N, so
+// with all four hacker models present each gets 0.25. Sums to 1, so the same
+// deficit-weighted ordering converges on equal shares. A missing model simply
+// leaves its share to whoever remains.
+function equalTargets(models) {
+  const t = {};
+  if (models) for (const m of models) t[m.id] = 1 / models.length;
+  return t;
+}
 function order(ranked, tgt, usage) {
   const N = usage.total();
   const sc = ranked.map((r) => r.score), lo = Math.min(...sc), hi = Math.max(...sc);
@@ -50,4 +59,4 @@ function order(ranked, tgt, usage) {
   }).sort((a, b) => b.prio - a.prio || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
-module.exports = { targets, Usage, order, FIXED, MIN, MAX };
+module.exports = { targets, equalTargets, Usage, order, FIXED, MIN, MAX };
