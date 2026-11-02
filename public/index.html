@@ -60,7 +60,7 @@ footer{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg)
 <main><div class="wrap">
   <section class="card" id="keycard"></section>
   <section class="card"><label class="chk" style="font-size:14px;color:var(--text)"><input type="checkbox" id="hackerToggle" onchange="setHacker(this.checked)"> <b>HACKER MODE</b></label>
-    <div class="mute" style="margin-top:4px">Routes only to four uncensored models; ignores the price cap.</div>
+    <div class="mute" style="margin-top:4px">Routes only to three uncensored models; ignores the price cap.</div>
     <div class="mute" id="hmode" style="margin-top:6px">Mode: normal (price-capped pool)</div>
     <div id="hlist" style="margin-top:6px"></div></section>
   <section class="card"><details class="panel" id="sharesPanel"><summary>Model shares <span class="mute" id="stotal"></span></summary>
@@ -83,8 +83,8 @@ fetch('/api/models').then(r=>r.json()).then(j=>{HMODELS=j.hackerIds||[];HINFO=j.
 function perM(x){return '$'+String(Number((Number(x)*1e6).toPrecision(4)))}
 function renderHacker(on){$('hackerToggle').checked=on;
  $('pmode').innerHTML=on?'<b>HACKER</b> mode':'normal mode';
- $('hmode').textContent=on?'Mode: HACKER (four uncensored models, equal 25% shares)':'Mode: normal (price-capped pool)';
- $('hlist').innerHTML=on?HMODELS.map(id=>{const i=HINFO[id]||{};return `<div class="mute">· ${esc(id)} — ${i.prompt!==undefined?perM(i.prompt)+'/'+perM(i.completion)+' per M':''}${i.ctx?` · ${Math.round(i.ctx/1000)}k ctx`:''}</div>`}).join('')+(HMODELS.length<4?'<div class="mute">Note: some hacker models are not listed by OpenRouter right now, so the pool is smaller.</div>':''):''}
+ $('hmode').textContent=on?'Mode: HACKER (three uncensored models, equal ~33% shares)':'Mode: normal (price-capped pool)';
+ $('hlist').innerHTML=on?HMODELS.map(id=>{const i=HINFO[id]||{};return `<div class="mute">· ${esc(id)} — ${i.prompt!==undefined?perM(i.prompt)+'/'+perM(i.completion)+' per M':''}${i.ctx?` · ${Math.round(i.ctx/1000)}k ctx`:''}</div>`}).join('')+(HMODELS.length<3?'<div class="mute">Note: some hacker models are not listed by OpenRouter right now, so the pool is smaller.</div>':''):''}
 async function setHacker(on){const j=await (await fetch('/api/mode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({hacker:on})})).json();try{sessionStorage.setItem('hacker',j.hacker?'1':'0')}catch{}renderHacker(j.hacker);shares()}
 function initHacker(){let want=false;try{want=sessionStorage.getItem('hacker')==='1'}catch{};if(want)setHacker(true);else renderHacker(false)}
 async function setKey(){const k=$('key').value.trim();if(!k)return;const j=await (await fetch('/api/key',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:k,save:$('savekey').checked})})).json();keySaved(j.saved?'saved to .env':'in server memory only')}

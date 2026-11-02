@@ -27,20 +27,20 @@ function run(models, n = 10000) {
   assert(Math.abs(c - 0.5) < 0.01, 'contributor ~50%'); assert(Math.abs(h - 0.1) < 0.01, 'haiku ~10%');
   for (const [id, s] of others) assert(s <= MAX + 1e-9, `${id} over 8%`);
   console.log('sim test OK');
-  // Hacker mode: the same deficit-weighted ordering over exactly the four
-  // models with equal targets must converge to ~25% each. Prefer the live
+  // Hacker mode: the same deficit-weighted ordering over exactly the three
+  // models with equal targets must converge to ~1/3 each. Prefer the live
   // list; fall back to synthetic models (from HACKER_INFO) if OpenRouter
-  // doesn't currently list all four.
+  // doesn't currently list all three.
   let hmodels = hackerSet(all && all.length ? all : models);
-  if (hmodels.length < 4) hmodels = HACKER_IDS.map((id) => ({ id, name: id, context_length: HACKER_INFO[id].ctx, pricing: { prompt: String(HACKER_INFO[id].prompt), completion: String(HACKER_INFO[id].completion) }, supported_parameters: ['tools'], architecture: { output_modalities: ['text'] } }));
-  assert.strictEqual(hmodels.length, 4, 'hacker pool is exactly four models');
+  if (hmodels.length < 3) hmodels = HACKER_IDS.map((id) => ({ id, name: id, context_length: HACKER_INFO[id].ctx, pricing: { prompt: String(HACKER_INFO[id].prompt), completion: String(HACKER_INFO[id].completion) }, supported_parameters: ['tools'], architecture: { output_modalities: ['text'] } }));
+  assert.strictEqual(hmodels.length, 3, 'hacker pool is exactly three models');
   function hrun(n = 1200) {
     const tgt = equalTargets(hmodels), u = new Usage(null), picks = [];
     const plans = PROMPTS.map((p) => rank(p, hmodels));
     for (let i = 0; i < n; i++) {
       const k = (i * 7 + Math.floor(i / 8)) % PROMPTS.length; // deterministic mix
       const pick = order(plans[k].ranked, tgt, u)[0];
-      assert(HACKER_IDS.includes(pick.id), 'hacker pick stays within the four');
+      assert(HACKER_IDS.includes(pick.id), 'hacker pick stays within the three');
       u.record(pick.id); picks.push(pick.id);
     }
     return { u, picks, tgt };
@@ -50,8 +50,8 @@ function run(models, n = 10000) {
   const hsum = Object.values(h1.tgt).reduce((x, y) => x + y, 0); assert(Math.abs(hsum - 1) < 1e-9, 'hacker targets sum to 1');
   const hshares = HACKER_IDS.map((id) => [id, h1.u.share(id)]);
   console.log('hacker shares: ' + hshares.map(([id, s]) => `${id} ${(s * 100).toFixed(2)}%`).join(', '));
-  for (const [id, s] of hshares) assert(Math.abs(s - 0.25) < 0.03, `${id} ~25% (got ${(s * 100).toFixed(2)}%)`);
-  // A missing/unknown model id is handled without throwing: three remain and
+  for (const [id, s] of hshares) assert(Math.abs(s - 1 / 3) < 0.03, `${id} ~33.3% (got ${(s * 100).toFixed(2)}%)`);
+  // A missing/unknown model id is handled without throwing: two remain and
   // their targets still sum to 1.
   const hpartial = hmodels.filter((m) => m.id !== HACKER_IDS[0]);
   const hpt = equalTargets(hpartial);

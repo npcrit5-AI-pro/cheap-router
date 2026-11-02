@@ -40,7 +40,7 @@ class Usage {
 // deficit = target*(N+1) - count  (picks owed); its sum over models is always 1 > 0.
 // fit is normalized to [1,2] so task fit tilts the choice but shares still converge.
 // Equal-share targets for hacker mode: every model in the pool gets 1/N, so
-// with all four hacker models present each gets 0.25. Sums to 1, so the same
+// with all three hacker models present each gets 1/3. Sums to 1, so the same
 // deficit-weighted ordering converges on equal shares. A missing model simply
 // leaves its share to whoever remains.
 function equalTargets(models) {

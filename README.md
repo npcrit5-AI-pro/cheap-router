@@ -65,15 +65,14 @@ The UI shows the target and actual share for each pick, plus a collapsible table
 `npm test` runs the price-filter test and `sim.test.js`. The sim test runs 10,000 mixed prompts twice. It checks that Contributor is about 50% and Haiku about 10%, every other model is at or under 8%, and both runs make identical picks.
 
 ## Hacker mode
-Off by default. When on, the router ignores the price cap (and `ALWAYS_ALLOW`) and routes every prompt to exactly four uncensored models. Classification and scoring are unchanged, so task fit still tilts each pick within the four, and the same deterministic deficit-weighted allocation from `alloc.js` is used — but with equal targets (0.25 each) instead of the normal 50/10 split, so over time each of the four answers about a quarter of prompts. If a model fails, the next candidate is tried, staying within the four.
+Off by default. When on, the router ignores the price cap (and `ALWAYS_ALLOW`) and routes every prompt to exactly three uncensored/open models. Classification and scoring are unchanged, so task fit still tilts each pick within the three, and the same deterministic deficit-weighted allocation from `alloc.js` is used — but with equal targets (1/3 each) instead of the normal 50/10 split, so over time each of the three answers about a third of prompts. If a model fails, the next candidate is tried, staying within the three.
 
-The four models (exact OpenRouter ids, prices per million tokens):
+The three models (exact OpenRouter ids, prices per million tokens):
 - `z-ai/glm-5.3-flash` — $0.0285/$0.0923 per M, 1M ctx
 - `cognitivecomputations/dolphin-mistral-24b-venice-edition` — $0.2/$0.9 per M, 128k ctx
-- `anthracite-org/magnum-v4-72b` — $2.5/$5 per M, 33k ctx (the request was for "magnum 72B v1", but the only Magnum model listed on OpenRouter is v4, so that id is used)
 - `mistralai/mistral-nemo` — $0.029/$0.03 per M, 131k ctx
 
-To turn it on, tick the **HACKER MODE** checkbox on the page. The state lasts for the browser session only (kept in `sessionStorage` and server memory via `POST /api/mode`; never written to `.env`). The page header shows which mode is active, lists the four models while hacker mode is on, and every reply is badged `HACKER` with the model id and its price per M tokens so the cost is visible.
+To turn it on, tick the **HACKER MODE** checkbox on the page. The state lasts for the browser session only (kept in `sessionStorage` and server memory via `POST /api/mode`; never written to `.env`). The page header shows which mode is active, lists the three models while hacker mode is on, and every reply is badged `HACKER` with the model id and its price per M tokens so the cost is visible.
 
 Note: these are third-party uncensored models whose output is not moderated by this router. You are responsible for what you send them and what you do with their replies.
 

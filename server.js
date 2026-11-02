@@ -14,13 +14,12 @@ const pct = (x) => (x * 100).toFixed(3) + '%';
 const perMTok = (x) => '$' + String(Number((Number(x) * 1e6).toPrecision(4)));
 const pricePerM = (m) => `${perMTok(m.pricing.prompt)}/${perMTok(m.pricing.completion)} per M`;
 // Candidate pool + share targets for the current mode. Hacker mode uses exactly
-// the four ids (from the full fetched list, so an above-cap model like Magnum
-// is still included) with equal 0.25 targets; the price cap and ALWAYS_ALLOW
-// logic in filterEligible are bypassed for this mode only.
+// the three ids (from the full fetched list) with equal 1/3 targets; the price
+// cap and ALWAYS_ALLOW logic in filterEligible are bypassed for this mode only.
 function poolFor(c) {
   if (!HACKER) return { models: c.models, tgt: targets(c.models), hacker: false };
-  const four = hackerSet(c.all && c.all.length ? c.all : c.models);
-  return { models: four, tgt: equalTargets(four), hacker: true };
+  const three = hackerSet(c.all && c.all.length ? c.all : c.models);
+  return { models: three, tgt: equalTargets(three), hacker: true };
 }
 const PORT = process.env.PORT || 3000, MAX_TRIES = 4;
 const HOST = process.env.HOST || '127.0.0.1'; // localhost only by default; set HOST=0.0.0.0 at your own risk
@@ -60,7 +59,7 @@ async function chat(messages) {
       const text = j.choices?.[0]?.message?.content;
       if (r.ok && text) { usage.record(cand.id); // count only on success
         const price = pricePerM(byId.get(cand.id) || { pricing: HACKER_INFO[cand.id] || { prompt: NaN, completion: NaN } });
-        const modeNote = hacker ? 'hacker mode (uncensored pool, equal 25% shares); ' : '';
+        const modeNote = hacker ? 'hacker mode (uncensored pool, equal 1/3 shares); ' : '';
         return { reply: text, model: cand.id, category: plan.cat, hacker, price, why: `${modeNote}${plan.why}; picked ${cand.id}: ${cand.why}; fit ${cand.fit.toFixed(2)} × deficit ${cand.deficit.toFixed(2)}; target ${pct(cand.target)}, actual before ${pct(cand.actual)} (now ${pct(usage.share(cand.id))})`, attempts }; }
       attempts.push({ model: cand.id, error: scrub(`${r.status} ${j.error?.message || 'empty reply'}`) });
       if (r.status === 401) break;

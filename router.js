@@ -4,21 +4,17 @@ const CAP_ID = 'anthropic/claude-haiku-5.5';
 const ALWAYS_ALLOW = [];
 // Preference boosts: strong picks per category (must still be eligible)
 const STRONG = { 'meta/muse-spark-1.3-contributor': ['reasoning', 'creative'] };
-// Hacker mode: exactly these four uncensored/open models, by exact OpenRouter id.
-// Note: "magnum 72B v1" was requested, but the only Magnum model listed on
-// OpenRouter is anthracite-org/magnum-v4-72b, so that id is used here.
+// Hacker mode: exactly these three uncensored/open models, by exact OpenRouter id.
 const HACKER_IDS = [
   'z-ai/glm-5.3-flash',
   'cognitivecomputations/dolphin-mistral-24b-venice-edition',
-  'anthracite-org/magnum-v4-72b',
   'mistralai/mistral-nemo',
 ];
-// Per-token prices (as listed on OpenRouter) and context lengths for the four
+// Per-token prices (as listed on OpenRouter) and context lengths for the three
 // hacker models. Used for display and as fallback data in tests.
 const HACKER_INFO = {
   'z-ai/glm-5.3-flash': { prompt: 0.0000000285, completion: 0.0000000923, ctx: 1048576 },
   'cognitivecomputations/dolphin-mistral-24b-venice-edition': { prompt: 0.0000002, completion: 0.0000009, ctx: 128000 },
-  'anthracite-org/magnum-v4-72b': { prompt: 0.0000025, completion: 0.000005, ctx: 32768 },
   'mistralai/mistral-nemo': { prompt: 0.000000029, completion: 0.00000003, ctx: 131072 },
 };
 // Pick exactly the hacker models out of a full model list, in HACKER_IDS order.
