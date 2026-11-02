@@ -4,7 +4,28 @@ const CAP_ID = 'anthropic/claude-haiku-5.5';
 const ALWAYS_ALLOW = [];
 // Preference boosts: strong picks per category (must still be eligible)
 const STRONG = { 'meta/muse-spark-1.3-contributor': ['reasoning', 'creative'] };
-let cache = { at: 0, cap: null, models: [] };
+// Hacker mode: exactly these three uncensored/open models, by exact OpenRouter id.
+const HACKER_IDS = [
+  'z-ai/glm-5.3-flash',
+  'cognitivecomputations/dolphin-mistral-24b-venice-edition',
+  'mistralai/mistral-nemo',
+];
+// Per-token prices (as listed on OpenRouter) and context lengths for the three
+// hacker models. Used for display and as fallback data in tests.
+const HACKER_INFO = {
+  'z-ai/glm-5.3-flash': { prompt: 0.0000000285, completion: 0.0000000923, ctx: 1048576 },
+  'cognitivecomputations/dolphin-mistral-24b-venice-edition': { prompt: 0.0000002, completion: 0.0000009, ctx: 128000 },
+  'mistralai/mistral-nemo': { prompt: 0.000000029, completion: 0.00000003, ctx: 131072 },
+};
+// Pick exactly the hacker models out of a full model list, in HACKER_IDS order.
+// Unknown ids are ignored and missing ones are skipped (never throws), so a
+// delisted model just shrinks the pool instead of breaking routing.
+function hackerSet(all) {
+  if (!Array.isArray(all)) return [];
+  const byId = new Map(all.map((m) => [m.id, m]));
+  return HACKER_IDS.map((id) => byId.get(id)).filter(Boolean);
+}
+let cache = { at: 0, cap: null, models: [], all: [] };
 
 const num = (x) => (x === undefined || x === null || x === '' ? NaN : Number(x));
 const isFree = (m) => num(m.pricing?.prompt) === 0 && num(m.pricing?.completion) === 0;
@@ -14,7 +35,7 @@ async function refreshModels(force = false) {
   const r = await fetch('https://openrouter.ai/api/v1/models');
   if (!r.ok) throw new Error('model list fetch failed: ' + r.status);
   const all = (await r.json()).data;
-  cache = { at: Date.now(), ...filterEligible(all) };
+  cache = { at: Date.now(), ...filterEligible(all), all };
   return cache;
 }
 
@@ -90,4 +111,4 @@ function rank(prompt, models) {
   return { ...c, ranked };
 }
 
-module.exports = { ALWAYS_ALLOW, refreshModels, filterEligible, classify, rank };
+module.exports = { ALWAYS_ALLOW, HACKER_IDS, HACKER_INFO, hackerSet, refreshModels, filterEligible, classify, rank };
